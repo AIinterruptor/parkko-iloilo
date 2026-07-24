@@ -19,6 +19,15 @@ Prototype. Spot data is mock data — no backend yet.
 
 Single self-contained HTML file. React 18 + Leaflet, compiled in-browser via Babel standalone. Open `index.html` in any browser, or visit the live URL.
 
+## Photo credits
+
+Hero images are free-licensed from Wikimedia Commons:
+
+- **Molo Church and Molo Plaza with Fountain** — Renz0903, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- **Iloilo River Esplanade Phase 6** — Johngaje92, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+
+Both are cropped and compressed for web delivery. Listing thumbnails are original SVG illustrations.
+
 ## Roadmap
 
 - [ ] Booker ↔ owner chat
