@@ -38,6 +38,49 @@ function savingsPct(spot, planKey){
   return Math.round((1 - rateFor(spot,planKey)/undiscounted) * 100);
 }
 
+/* ---------- PUBLIC / FREE PARKING ----------
+   Mall & public lots that already exist in Iloilo. These aren't rentals —
+   they answer "where can I just park for free right now?" Crowd-sourced
+   vacancy (Waze-style) tells drivers how full each one is. */
+
+const VACANCY_LEVELS = {
+  open: {label:'Wide open',   color:'#16a34a', emoji:'🟢'},
+  some: {label:'Some space',  color:'#f59e0b', emoji:'🟡'},
+  full: {label:'Full',        color:'#dc2626', emoji:'🔴'},
+};
+
+const PUBLIC_LOTS = [
+  {id:'sm-city',   name:'SM City Iloilo',            area:'Mandurriao', lat:10.7095, lng:122.5486, note:'Large covered mall parking · paid after free window'},
+  {id:'festive',   name:'Festive Walk / IBP',        area:'Mandurriao', lat:10.7128, lng:122.5432, note:'Iloilo Business Park open-air + parkade'},
+  {id:'robinsons', name:'Robinsons Place Iloilo',    area:'City Proper',lat:10.6969, lng:122.5701, note:'Mall parking, Ledesco entrance'},
+  {id:'atria',     name:'Atria Park District',       area:'Mandurriao', lat:10.7156, lng:122.5501, note:'Open lot beside the dining strip'},
+  {id:'gt-mall',   name:'GT Mall (formerly Amigo)',  area:'City Proper',lat:10.6952, lng:122.5678, note:'Downtown, close to plaza'},
+  {id:'plaza-lib', name:'Plaza Libertad',            area:'City Proper',lat:10.6931, lng:122.5732, note:'Street & plaza parking, free'},
+  {id:'megaworld', name:'Iloilo Convention Center',  area:'Mandurriao', lat:10.7180, lng:122.5455, note:'Large free lot on event-free days'},
+];
+
+/* ---------- VACANCY STORE (swappable backend) ----------
+   Reports live behind this thin layer: localStorage today, Firebase the
+   moment a config is wired in. The UI never touches the backend directly. */
+
+const VacancyStore = {
+  _local(){
+    try { return JSON.parse(localStorage.getItem('parkko_vacancy')||'{}'); }
+    catch(e){ return {}; }
+  },
+  getAll(){ return this._local(); },
+  report(lotId, level){
+    // stamped time is passed in by the caller (no Date.now allowed at module load,
+    // but this runs on a user click, so a fresh Date is fine here)
+    const all = this._local();
+    all[lotId] = {level, ts:new Date().toISOString()};
+    try { localStorage.setItem('parkko_vacancy', JSON.stringify(all)); } catch(e){}
+    return all;
+  },
+  // subscribe(cb): Firebase will push here; localStorage version is a no-op.
+  subscribe(cb){ return ()=>{}; },
+};
+
 /* ---------- HERO PHOTOS ----------
    Real Iloilo landmarks behind the search panel. Free-licensed from
    Wikimedia Commons, cropped to a 21:9 band and compressed so the whole
@@ -624,6 +667,19 @@ function BrowseView({spots, onOpen}){
 function MapView({spots, onOpen}){
   const mapRef = useRef(null);
   const mapObj = useRef(null);
+  const [showRentals,setShowRentals] = useState(true);
+  const [showPublic,setShowPublic] = useState(true);
+  const [vacancy,setVacancy] = useState(()=>VacancyStore.getAll());
+
+  // A driver taps a level from the popup; store it and refresh.
+  function reportVacancy(lotId, level){
+    setVacancy(VacancyStore.report(lotId, level));
+  }
+  // Expose to Leaflet popups (they're raw HTML, not React).
+  useEffect(()=>{
+    window.__parkkoViewSpot = (id)=> onOpen(id);
+    window.__parkkoReport = (lotId, level)=> reportVacancy(lotId, level);
+  },[]);
 
   useEffect(()=>{
     if(!mapRef.current) return;
@@ -633,33 +689,68 @@ function MapView({spots, onOpen}){
       attribution:'&copy; OpenStreetMap contributors', maxZoom:19,
     }).addTo(map);
 
-    window.__parkkoViewSpot = (id)=> onOpen(id);
-
-    spots.forEach(spot=>{
+    if(showRentals) spots.forEach(spot=>{
       const icon = L.divIcon({
         className:'', html:`<div class="price-pin">₱${spot.price}/hr</div>`, iconSize:[70,30], iconAnchor:[35,15],
       });
       const marker = L.marker([spot.lat, spot.lng], {icon}).addTo(map);
       const rating = fmtRating(spot);
-      const popupHtml = `
+      marker.bindPopup(`
         <div class="popup-card">
           <h4>${spot.title}</h4>
           <p>📍 ${spot.area} ${rating ? '· ★ '+rating : '· New listing'}</p>
           <button onclick="window.__parkkoViewSpot('${spot.id}')">View details</button>
-        </div>`;
-      marker.bindPopup(popupHtml);
+        </div>`);
+    });
+
+    if(showPublic) PUBLIC_LOTS.forEach(lot=>{
+      const v = vacancy[lot.id];
+      const lvl = v ? VACANCY_LEVELS[v.level] : null;
+      const dot = lvl ? lvl.color : '#94a3b8';
+      const icon = L.divIcon({
+        className:'',
+        html:`<div class="public-pin" style="--vac:${dot}"><span>P</span></div>`,
+        iconSize:[30,38], iconAnchor:[15,38],
+      });
+      const marker = L.marker([lot.lat, lot.lng], {icon}).addTo(map);
+      const statusLine = lvl
+        ? `<p class="vac-status" style="color:${lvl.color}">${lvl.emoji} ${lvl.label}</p>`
+        : `<p class="vac-status muted">No recent report</p>`;
+      const buttons = Object.entries(VACANCY_LEVELS).map(([k,val])=>
+        `<button class="vac-btn" style="border-color:${val.color};color:${val.color}" onclick="window.__parkkoReport('${lot.id}','${k}')">${val.emoji} ${val.label}</button>`
+      ).join('');
+      marker.bindPopup(`
+        <div class="popup-card">
+          <h4>🅿️ ${lot.name}</h4>
+          <p>📍 ${lot.area} · Free / public</p>
+          <p style="font-size:11px;color:#64748b">${lot.note}</p>
+          ${statusLine}
+          <p style="font-size:11px;font-weight:700;margin-top:6px">How full is it now?</p>
+          <div class="vac-btns">${buttons}</div>
+        </div>`);
     });
 
     return ()=>{ map.remove(); mapObj.current=null; };
-  },[spots]);
+  },[spots, showRentals, showPublic, vacancy]);
+
+  const reportedCount = Object.keys(vacancy).length;
 
   return (
     <div className="wrap">
       <div className="toolbar">
-        <h2>Map of available parking spots</h2>
+        <h2>Parking map</h2>
+      </div>
+      <div className="map-legend">
+        <button className={"legend-toggle"+(showRentals?' on':'')} onClick={()=>setShowRentals(v=>!v)}>
+          <span className="legend-swatch rental"></span> Rentals ({spots.length})
+        </button>
+        <button className={"legend-toggle"+(showPublic?' on':'')} onClick={()=>setShowPublic(v=>!v)}>
+          <span className="legend-swatch public"></span> Free / public ({PUBLIC_LOTS.length})
+        </button>
+        <span className="legend-vac">🟢 open · 🟡 some · 🔴 full{reportedCount>0?` · ${reportedCount} reported`:''}</span>
       </div>
       <div className="map-wrap"><div id="leaflet-map" ref={mapRef}></div></div>
-      <p className="muted" style={{marginTop:10,fontSize:13}}>Tap a price pin to preview a spot, or click "View details" then "Get Directions" to open turn-by-turn navigation in Google Maps.</p>
+      <p className="muted" style={{marginTop:10,fontSize:13}}>Teal pins are rentals — tap to book. Grey "P" pins are free/public lots (malls, plazas); tap one to see how full it is or report the current status yourself.</p>
     </div>
   );
 }
