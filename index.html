@@ -13,21 +13,30 @@
     --brand-dark:#0b544e;
     --brand-light:#e6f5f3;
     --accent:#f59e0b;
-    --ink:#1f2937;
-    --muted:#6b7280;
-    --line:#e5e7eb;
-    --bg:#f8faf9;
-    --danger:#dc2626;
+    --ink:#1c2b2a;          /* warmer near-black, hint of the brand */
+    --muted:#6b7770;        /* warm grey */
+    --line:#e9e6e0;         /* warm hairline */
+    --bg:#faf9f7;           /* Airbnb-style warm off-white */
+    --card:#ffffff;
+    --danger:#e01e5a;
     --radius:16px;
+    --display:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif;
+    --body:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --shadow-sm:0 1px 2px rgba(28,43,42,.06);
+    --shadow-md:0 6px 20px rgba(28,43,42,.08);
+    --shadow-lg:0 12px 34px rgba(28,43,42,.12);
   }
   *{box-sizing:border-box;}
   html,body,#root{height:100%;}
   body{
     margin:0;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-family:var(--body);
     background:var(--bg);
     color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
   }
+  h1,h2,h3,h4,.card-title,.brand,.price{font-family:var(--display);letter-spacing:-.01em;}
   a{color:inherit;}
   button{font-family:inherit;cursor:pointer;}
   .app{display:flex;flex-direction:column;min-height:100vh;}
@@ -110,20 +119,31 @@
   }
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px;}
+  /* Airbnb-style: borderless card, rounded photo, quiet type, heart to save */
   .card{
-    background:#fff;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);
-    transition:transform .15s ease, box-shadow .15s ease;cursor:pointer;
+    background:transparent;border-radius:0;overflow:visible;border:none;
+    cursor:pointer;transition:transform .18s ease;
   }
-  .card:hover{transform:translateY(-3px);box-shadow:0 12px 24px rgba(15,23,42,.1);}
+  .card:hover{transform:translateY(-2px);}
+  .card:hover .card-photo img{transform:scale(1.04);}
   .card-photo{
-    height:150px;display:flex;align-items:center;justify-content:center;font-size:46px;position:relative;
-    overflow:hidden;background-size:cover;background-position:center;
+    height:210px;display:flex;align-items:center;justify-content:center;font-size:52px;position:relative;
+    overflow:hidden;background-size:cover;background-position:center;border-radius:14px;
+    box-shadow:var(--shadow-sm);
   }
-  .card-photo img{width:100%;height:100%;object-fit:cover;display:block;}
+  .card-photo img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s ease;}
   .photo-count{
-    position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;
-    font-weight:700;padding:3px 9px;border-radius:999px;backdrop-filter:blur(4px);
+    position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;font-size:11px;
+    font-weight:600;padding:3px 9px;border-radius:999px;backdrop-filter:blur(4px);
   }
+  .card-heart{
+    position:absolute;top:11px;right:11px;width:32px;height:32px;border:none;border-radius:50%;
+    background:transparent;color:#fff;font-size:19px;line-height:1;cursor:pointer;z-index:2;
+    filter:drop-shadow(0 1px 3px rgba(0,0,0,.5));transition:transform .15s ease;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .card-heart:hover{transform:scale(1.15);}
+  .card-heart.saved{color:var(--danger);}
   .plan-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px;}
   .plan-tab{
     position:relative;padding:10px 6px 9px;border-radius:12px;border:2px solid var(--line);background:#fff;
@@ -202,22 +222,24 @@
   }
   .gallery img.active{border-color:var(--brand);}
   .badge-new{
-    position:absolute;top:10px;left:10px;background:#fff;color:var(--brand-dark);font-size:11px;font-weight:800;
-    padding:4px 10px;border-radius:999px;
+    position:absolute;top:11px;left:11px;background:#fff;color:var(--brand-dark);font-size:11px;font-weight:700;
+    padding:4px 11px;border-radius:999px;box-shadow:var(--shadow-sm);
   }
-  .badge-rating{
-    position:absolute;top:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;font-weight:700;
-    padding:4px 10px;border-radius:999px;display:flex;align-items:center;gap:4px;
-  }
-  .card-body{padding:14px 16px 16px;}
-  .card-title{font-weight:700;font-size:15px;margin:0 0 2px;line-height:1.3;}
-  .card-area{color:var(--muted);font-size:13px;margin:0 0 8px;}
-  .card-amenities{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+  .badge-rating{display:none;} /* rating now sits inline with the title, Airbnb-style */
+  .card-body{padding:11px 2px 4px;}
+  .card-titlerow{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
+  .card-title{font-weight:600;font-size:15px;margin:0;line-height:1.3;color:var(--ink);}
+  .card-rating-inline{font-size:13px;font-weight:500;color:var(--ink);white-space:nowrap;display:flex;align-items:center;gap:3px;}
+  .card-rating-inline.new{color:var(--muted);}
+  .card-area{color:var(--muted);font-size:13.5px;margin:2px 0 6px;}
+  .card-amenities{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
   .amenity-pill{font-size:11px;background:var(--brand-light);color:var(--brand-dark);padding:3px 8px;border-radius:999px;font-weight:600;}
   .card-footer{display:flex;justify-content:space-between;align-items:baseline;}
-  .price{font-weight:800;font-size:16px;}
-  .price span{font-weight:500;font-size:12px;color:var(--muted);}
+  .price{font-weight:700;font-size:15px;color:var(--ink);}
+  .price span{font-weight:400;font-size:13.5px;color:var(--ink);}
   .empty{text-align:center;padding:60px 20px;color:var(--muted);}
+  .empty-saved{text-align:center;padding:70px 20px;color:var(--muted);}
+  .empty-saved h3{margin:10px 0 4px;font-size:20px;color:var(--ink);}
 
   /* MAP */
   .map-wrap{border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);height:560px;}
@@ -341,6 +363,9 @@
 </style>
 </head>
 <body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <div id="root"></div>
 
 <!-- Firebase SDK (compat build). Loaded from CDN — real accounts need a
@@ -1550,6 +1575,18 @@ function loadChats() {
     return {};
   }
 }
+function loadSaved() {
+  try {
+    return JSON.parse(localStorage.getItem('parkko_saved') || '[]');
+  } catch (err) {
+    return [];
+  }
+}
+function persistSaved(ids) {
+  try {
+    localStorage.setItem('parkko_saved', JSON.stringify(ids));
+  } catch (err) {}
+}
 function saveChats(chats) {
   try {
     localStorage.setItem('parkko_chats', JSON.stringify(chats));
@@ -1714,7 +1751,9 @@ function AmenityPill({
 }
 function SpotCard({
   spot,
-  onOpen
+  onOpen,
+  saved,
+  onToggleSave
 }) {
   const rating = fmtRating(spot);
   const hasPhotos = spot.photos && spot.photos.length > 0;
@@ -1736,46 +1775,44 @@ function SpotCard({
     }
   }, ICONS[spot.icon % ICONS.length]), spot.reviews.length === 0 && /*#__PURE__*/React.createElement("span", {
     className: "badge-new"
-  }, "New listing"), rating && /*#__PURE__*/React.createElement("span", {
-    className: "badge-rating"
-  }, "\u2605 ", rating), hasPhotos && spot.photos.length > 1 && /*#__PURE__*/React.createElement("span", {
+  }, "New"), /*#__PURE__*/React.createElement("button", {
+    className: "card-heart" + (saved ? ' saved' : ''),
+    onClick: e => {
+      e.stopPropagation();
+      onToggleSave(spot.id);
+    },
+    "aria-label": saved ? 'Remove from saved' : 'Save spot'
+  }, saved ? '♥' : '♡'), hasPhotos && spot.photos.length > 1 && /*#__PURE__*/React.createElement("span", {
     className: "photo-count"
   }, "\uD83D\uDCF7 ", spot.photos.length)), /*#__PURE__*/React.createElement("div", {
     className: "card-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-titlerow"
   }, /*#__PURE__*/React.createElement("p", {
     className: "card-title"
-  }, spot.title), /*#__PURE__*/React.createElement("p", {
+  }, spot.title), /*#__PURE__*/React.createElement("span", {
+    className: "card-rating-inline" + (rating ? '' : ' new')
+  }, rating ? /*#__PURE__*/React.createElement(React.Fragment, null, "\u2605 ", rating) : 'New')), /*#__PURE__*/React.createElement("p", {
     className: "card-area"
-  }, "\uD83D\uDCCD ", spot.area, " \xB7 ", spot.type), /*#__PURE__*/React.createElement("div", {
-    className: "card-amenities"
-  }, spot.amenities.slice(0, 3).map(a => /*#__PURE__*/React.createElement(AmenityPill, {
-    key: a,
-    k: a
-  }))), /*#__PURE__*/React.createElement("div", {
+  }, spot.area, " \xB7 ", spot.type), /*#__PURE__*/React.createElement("div", {
     className: "card-footer"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     className: "price"
-  }, "\u20B1", spot.price, /*#__PURE__*/React.createElement("span", null, " /hour")), /*#__PURE__*/React.createElement("div", {
+  }, "\u20B1", spot.price, /*#__PURE__*/React.createElement("span", null, " / hour")), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
-      color: 'var(--muted)',
-      fontWeight: 600,
-      marginTop: 2
+      fontSize: 12.5,
+      color: 'var(--muted)'
     }
-  }, "or \u20B1", rateFor(spot, 'day'), "/day \xB7 \u20B1", rateFor(spot, 'month'), "/mo")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: 'var(--muted)',
-      fontWeight: 600
-    }
-  }, spot.reviews.length > 0 ? `${spot.reviews.length} review${spot.reviews.length > 1 ? 's' : ''}` : 'Be the first to review'))));
+  }, "\u20B1", rateFor(spot, 'month'), "/mo"))));
 }
 
 /* ---------- BROWSE VIEW ---------- */
 
 function BrowseView({
   spots,
-  onOpen
+  onOpen,
+  savedIds,
+  onToggleSave
 }) {
   const [q, setQ] = useState('');
   const [area, setArea] = useState('All Areas');
@@ -1860,7 +1897,9 @@ function BrowseView({
   }, filtered.map(s => /*#__PURE__*/React.createElement(SpotCard, {
     key: s.id,
     spot: s,
-    onOpen: onOpen
+    onOpen: onOpen,
+    saved: savedIds.includes(s.id),
+    onToggleSave: onToggleSave
   })))));
 }
 
@@ -3079,6 +3118,42 @@ function AuthModal({
     onClick: submit
   }, busy ? 'Please wait…' : mode === 'signup' ? `Create ${role} account` : 'Log in'))));
 }
+function SavedView({
+  spots,
+  savedIds,
+  onOpen,
+  onToggleSave,
+  onBrowse
+}) {
+  const saved = savedIds.map(id => spots.find(s => s.id === id)).filter(Boolean);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "wrap"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "toolbar"
+  }, /*#__PURE__*/React.createElement("h2", null, "Saved spots")), saved.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty-saved"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 44
+    }
+  }, "\u2661"), /*#__PURE__*/React.createElement("h3", null, "No saved spots yet"), /*#__PURE__*/React.createElement("p", {
+    className: "muted"
+  }, "Tap the heart on any spot to keep it here for later."), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary",
+    style: {
+      marginTop: 14
+    },
+    onClick: onBrowse
+  }, "Browse spots")) : /*#__PURE__*/React.createElement("div", {
+    className: "grid"
+  }, saved.map(s => /*#__PURE__*/React.createElement(SpotCard, {
+    key: s.id,
+    spot: s,
+    onOpen: onOpen,
+    saved: true,
+    onToggleSave: onToggleSave
+  }))));
+}
 function App() {
   const [tab, setTab] = useState('browse');
   const [spots, setSpots] = useState(() => loadSpots() || SEEDED_SPOTS);
@@ -3093,6 +3168,15 @@ function App() {
   const [chats, setChats] = useState(loadChats);
   const [account, setAccount] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
+  const [savedIds, setSavedIds] = useState(loadSaved);
+  function toggleSave(id) {
+    setSavedIds(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [id, ...prev];
+      persistSaved(next);
+      showToast(prev.includes(id) ? 'Removed from saved.' : '♥ Saved to your list.');
+      return next;
+    });
+  }
 
   // React to login/logout from either backend.
   useEffect(() => {
@@ -3180,6 +3264,9 @@ function App() {
     className: "navtab" + (tab === 'map' ? ' active' : ''),
     onClick: () => setTab('map')
   }, "Map"), /*#__PURE__*/React.createElement("button", {
+    className: "navtab" + (tab === 'saved' ? ' active' : ''),
+    onClick: () => setTab('saved')
+  }, "Saved", savedIds.length > 0 ? ` (${savedIds.length})` : ''), /*#__PURE__*/React.createElement("button", {
     className: "navtab" + (tab === 'bookings' ? ' active' : ''),
     onClick: () => setTab('bookings')
   }, "My Bookings", bookings.length > 0 ? ` (${bookings.length})` : '')), /*#__PURE__*/React.createElement("div", {
@@ -3202,7 +3289,15 @@ function App() {
     onClick: () => setTab('host')
   }, "List your spot"))), /*#__PURE__*/React.createElement("main", null, tab === 'browse' && /*#__PURE__*/React.createElement(BrowseView, {
     spots: spots,
-    onOpen: setSelectedId
+    onOpen: setSelectedId,
+    savedIds: savedIds,
+    onToggleSave: toggleSave
+  }), tab === 'saved' && /*#__PURE__*/React.createElement(SavedView, {
+    spots: spots,
+    savedIds: savedIds,
+    onOpen: setSelectedId,
+    onToggleSave: toggleSave,
+    onBrowse: () => setTab('browse')
   }), tab === 'map' && /*#__PURE__*/React.createElement(MapView, {
     spots: spots,
     onOpen: setSelectedId

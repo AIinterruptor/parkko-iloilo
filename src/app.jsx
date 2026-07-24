@@ -521,6 +521,14 @@ function loadChats(){
   }
 }
 
+function loadSaved(){
+  try { return JSON.parse(localStorage.getItem('parkko_saved')||'[]'); }
+  catch(err){ return []; }
+}
+function persistSaved(ids){
+  try { localStorage.setItem('parkko_saved', JSON.stringify(ids)); } catch(err){}
+}
+
 function saveChats(chats){
   try { localStorage.setItem('parkko_chats', JSON.stringify(chats)); return {ok:true}; }
   catch(err){ return {ok:false}; }
@@ -632,7 +640,7 @@ function AmenityPill({k}){
   return <span className="amenity-pill">{a.icon} {a.label}</span>;
 }
 
-function SpotCard({spot, onOpen}){
+function SpotCard({spot, onOpen, saved, onToggleSave}){
   const rating = fmtRating(spot);
   const hasPhotos = spot.photos && spot.photos.length > 0;
   return (
@@ -641,26 +649,25 @@ function SpotCard({spot, onOpen}){
         {hasPhotos
           ? <img src={spot.photos[0]} alt={spot.title} loading="lazy" />
           : <span style={{filter:'drop-shadow(0 2px 4px rgba(0,0,0,.25))'}}>{ICONS[spot.icon % ICONS.length]}</span>}
-        {spot.reviews.length===0 && <span className="badge-new">New listing</span>}
-        {rating && <span className="badge-rating">★ {rating}</span>}
+        {spot.reviews.length===0 && <span className="badge-new">New</span>}
+        <button className={"card-heart"+(saved?' saved':'')}
+          onClick={(e)=>{ e.stopPropagation(); onToggleSave(spot.id); }}
+          aria-label={saved?'Remove from saved':'Save spot'}>
+          {saved ? '♥' : '♡'}
+        </button>
         {hasPhotos && spot.photos.length>1 && <span className="photo-count">📷 {spot.photos.length}</span>}
       </div>
       <div className="card-body">
-        <p className="card-title">{spot.title}</p>
-        <p className="card-area">📍 {spot.area} · {spot.type}</p>
-        <div className="card-amenities">
-          {spot.amenities.slice(0,3).map(a=><AmenityPill key={a} k={a} />)}
+        <div className="card-titlerow">
+          <p className="card-title">{spot.title}</p>
+          <span className={"card-rating-inline"+(rating?'':' new')}>
+            {rating ? <React.Fragment>★ {rating}</React.Fragment> : 'New'}
+          </span>
         </div>
+        <p className="card-area">{spot.area} · {spot.type}</p>
         <div className="card-footer">
-          <div>
-            <div className="price">₱{spot.price}<span> /hour</span></div>
-            <div style={{fontSize:11,color:'var(--muted)',fontWeight:600,marginTop:2}}>
-              or ₱{rateFor(spot,'day')}/day · ₱{rateFor(spot,'month')}/mo
-            </div>
-          </div>
-          <div style={{fontSize:12,color:'var(--muted)',fontWeight:600}}>
-            {spot.reviews.length>0 ? `${spot.reviews.length} review${spot.reviews.length>1?'s':''}` : 'Be the first to review'}
-          </div>
+          <div className="price">₱{spot.price}<span> / hour</span></div>
+          <div style={{fontSize:12.5,color:'var(--muted)'}}>₱{rateFor(spot,'month')}/mo</div>
         </div>
       </div>
     </div>
@@ -669,7 +676,7 @@ function SpotCard({spot, onOpen}){
 
 /* ---------- BROWSE VIEW ---------- */
 
-function BrowseView({spots, onOpen}){
+function BrowseView({spots, onOpen, savedIds, onToggleSave}){
   const [q,setQ] = useState('');
   const [area,setArea] = useState('All Areas');
   const [sort,setSort] = useState('rating');
@@ -745,7 +752,7 @@ function BrowseView({spots, onOpen}){
           <div className="empty">No spots match your search. Try another area or keyword.</div>
         ) : (
           <div className="grid">
-            {filtered.map(s=><SpotCard key={s.id} spot={s} onOpen={onOpen} />)}
+            {filtered.map(s=><SpotCard key={s.id} spot={s} onOpen={onOpen} saved={savedIds.includes(s.id)} onToggleSave={onToggleSave} />)}
           </div>
         )}
       </div>
@@ -1518,6 +1525,27 @@ function AuthModal({onClose, onAuthed}){
   );
 }
 
+function SavedView({spots, savedIds, onOpen, onToggleSave, onBrowse}){
+  const saved = savedIds.map(id=>spots.find(s=>s.id===id)).filter(Boolean);
+  return (
+    <div className="wrap">
+      <div className="toolbar"><h2>Saved spots</h2></div>
+      {saved.length===0 ? (
+        <div className="empty-saved">
+          <div style={{fontSize:44}}>♡</div>
+          <h3>No saved spots yet</h3>
+          <p className="muted">Tap the heart on any spot to keep it here for later.</p>
+          <button className="btn-primary" style={{marginTop:14}} onClick={onBrowse}>Browse spots</button>
+        </div>
+      ) : (
+        <div className="grid">
+          {saved.map(s=><SpotCard key={s.id} spot={s} onOpen={onOpen} saved={true} onToggleSave={onToggleSave} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App(){
   const [tab,setTab] = useState('browse');
   const [spots,setSpots] = useState(()=> loadSpots() || SEEDED_SPOTS);
@@ -1532,6 +1560,16 @@ function App(){
   const [chats,setChats] = useState(loadChats);
   const [account,setAccount] = useState(null);
   const [showAuth,setShowAuth] = useState(false);
+  const [savedIds,setSavedIds] = useState(loadSaved);
+
+  function toggleSave(id){
+    setSavedIds(prev=>{
+      const next = prev.includes(id) ? prev.filter(x=>x!==id) : [id, ...prev];
+      persistSaved(next);
+      showToast(prev.includes(id) ? 'Removed from saved.' : '♥ Saved to your list.');
+      return next;
+    });
+  }
 
   // React to login/logout from either backend.
   useEffect(()=>{
@@ -1600,6 +1638,7 @@ function App(){
         <div className="navtabs">
           <button className={"navtab"+(tab==='browse'?' active':'')} onClick={()=>setTab('browse')}>Browse</button>
           <button className={"navtab"+(tab==='map'?' active':'')} onClick={()=>setTab('map')}>Map</button>
+          <button className={"navtab"+(tab==='saved'?' active':'')} onClick={()=>setTab('saved')}>Saved{savedIds.length>0?` (${savedIds.length})`:''}</button>
           <button className={"navtab"+(tab==='bookings'?' active':'')} onClick={()=>setTab('bookings')}>My Bookings{bookings.length>0?` (${bookings.length})`:''}</button>
         </div>
         <div className="navright">
@@ -1620,7 +1659,8 @@ function App(){
       </div>
 
       <main>
-        {tab==='browse' && <BrowseView spots={spots} onOpen={setSelectedId} />}
+        {tab==='browse' && <BrowseView spots={spots} onOpen={setSelectedId} savedIds={savedIds} onToggleSave={toggleSave} />}
+        {tab==='saved' && <SavedView spots={spots} savedIds={savedIds} onOpen={setSelectedId} onToggleSave={toggleSave} onBrowse={()=>setTab('browse')} />}
         {tab==='map' && <MapView spots={spots} onOpen={setSelectedId} />}
         {tab==='host' && <ListSpotView onPublish={handlePublish} />}
         {tab==='bookings' && <MyBookingsView bookings={bookings} spots={spots} onReview={setReviewSpotId} />}
