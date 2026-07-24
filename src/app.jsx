@@ -10,12 +10,12 @@ const {useState,useEffect,useRef,useMemo} = React;
    into FIREBASE_CONFIG. Until apiKey is filled, the app runs in local mode. */
 
 const FIREBASE_CONFIG = {
-  apiKey: "",              // <-- paste from console
+  apiKey: "AIzaSyCrXKKzqhokI9iUhSKtjwsuB-k-wiEKgaY",
   authDomain: "parkko-5b9ac.firebaseapp.com",
   projectId: "parkko-5b9ac",
   storageBucket: "parkko-5b9ac.firebasestorage.app",
-  messagingSenderId: "", // <-- paste from console
-  appId: "",             // <-- paste from console
+  messagingSenderId: "706169047549",
+  appId: "1:706169047549:web:9f6979bc4f45c5e5ddf194",
 };
 
 const FIREBASE_READY = !!FIREBASE_CONFIG.apiKey && typeof firebase !== 'undefined';
