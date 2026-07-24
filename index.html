@@ -248,6 +248,21 @@
     background:#fff;border:1.5px solid;padding:5px 8px;border-radius:7px;font-size:11px;font-weight:800;
     width:100%;text-align:left;cursor:pointer;
   }
+  /* --- auth / accounts --- */
+  .account-box{display:flex;align-items:center;gap:8px;}
+  .account-chip{display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;color:var(--ink);background:var(--bg);border:1px solid var(--line);padding:6px 12px;border-radius:999px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mini-verified{background:#dcfce7;color:#15803d;border-radius:50%;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;}
+  .auth-tabs{display:flex;gap:4px;background:var(--bg);border-radius:12px;padding:4px;margin-bottom:16px;}
+  .auth-tab{flex:1;padding:9px;border:none;background:none;border-radius:9px;font-weight:800;font-size:14px;color:var(--muted);cursor:pointer;}
+  .auth-tab.active{background:#fff;color:var(--brand);box-shadow:0 1px 3px rgba(0,0,0,.08);}
+  .auth-label{font-size:13px;font-weight:700;display:block;margin-bottom:8px;}
+  .role-picker{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .role-opt{display:flex;flex-direction:column;align-items:center;gap:2px;padding:14px 8px;border:2px solid var(--line);border-radius:14px;background:#fff;cursor:pointer;transition:.15s;}
+  .role-opt:hover{border-color:#99f6e4;}
+  .role-opt.active{border-color:var(--brand);background:#f0fdfa;box-shadow:0 0 0 3px rgba(15,118,110,.1);}
+  .role-emoji{font-size:26px;}
+  .role-name{font-size:13px;font-weight:800;color:var(--ink);}
+  .role-sub{font-size:11px;color:var(--muted);font-weight:700;}
   .map-legend{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 10px;}
   .legend-toggle{
     display:flex;align-items:center;gap:6px;background:#fff;border:1.5px solid var(--line);
@@ -327,6 +342,13 @@
 </head>
 <body>
 <div id="root"></div>
+
+<!-- Firebase SDK (compat build). Loaded from CDN — real accounts need a
+     network connection anyway. The app guards every Firebase call and falls
+     back to localStorage if these fail to load or no config is set. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <script>
 /**
@@ -644,6 +666,160 @@ const {
   useRef,
   useMemo
 } = React;
+
+/* ---------- FIREBASE (accounts + database) ----------
+   Real host/driver accounts and a shared database. The whole integration
+   sits behind the Auth object below, so the UI never calls Firebase directly
+   and the app still runs (on localStorage) when Firebase isn't configured.
+
+   TO ACTIVATE: paste the firebaseConfig from
+   Firebase Console → Project Settings → General → Your apps → Config
+   into FIREBASE_CONFIG. Until apiKey is filled, the app runs in local mode. */
+
+const FIREBASE_CONFIG = {
+  apiKey: "",
+  // <-- paste from console
+  authDomain: "parkko-5b9ac.firebaseapp.com",
+  projectId: "parkko-5b9ac",
+  storageBucket: "parkko-5b9ac.firebasestorage.app",
+  messagingSenderId: "",
+  // <-- paste from console
+  appId: "" // <-- paste from console
+};
+const FIREBASE_READY = !!FIREBASE_CONFIG.apiKey && typeof firebase !== 'undefined';
+
+/* Auth abstraction. Firebase when configured; a localStorage stand-in
+   otherwise so registration/login still demo without a backend. Both expose
+   the same surface: current(), onChange(), register(), login(), logout(). */
+
+const Auth = function () {
+  let fb = null,
+    fbAuth = null,
+    fbDb = null;
+  if (FIREBASE_READY) {
+    fb = firebase.initializeApp(FIREBASE_CONFIG);
+    fbAuth = firebase.auth();
+    fbDb = firebase.firestore();
+  }
+
+  // ----- localStorage fallback -----
+  const LKEY = 'parkko_accounts',
+    SKEY = 'parkko_session';
+  function lAccounts() {
+    try {
+      return JSON.parse(localStorage.getItem(LKEY) || '{}');
+    } catch (e) {
+      return {};
+    }
+  }
+  function lSaveAccounts(a) {
+    try {
+      localStorage.setItem(LKEY, JSON.stringify(a));
+    } catch (e) {}
+  }
+  function lSession() {
+    try {
+      return JSON.parse(localStorage.getItem(SKEY) || 'null');
+    } catch (e) {
+      return null;
+    }
+  }
+  function lSetSession(u) {
+    try {
+      u ? localStorage.setItem(SKEY, JSON.stringify(u)) : localStorage.removeItem(SKEY);
+    } catch (e) {}
+  }
+  return {
+    mode: FIREBASE_READY ? 'firebase' : 'local',
+    onChange(cb) {
+      if (FIREBASE_READY) {
+        return fbAuth.onAuthStateChanged(async u => {
+          if (!u) {
+            cb(null);
+            return;
+          }
+          let profile = {};
+          try {
+            const snap = await fbDb.collection('users').doc(u.uid).get();
+            profile = snap.exists ? snap.data() : {};
+          } catch (e) {}
+          cb({
+            uid: u.uid,
+            email: u.email,
+            ...profile
+          });
+        });
+      }
+      cb(lSession());
+      return () => {};
+    },
+    async register({
+      email,
+      password,
+      name,
+      role
+    }) {
+      if (FIREBASE_READY) {
+        const cred = await fbAuth.createUserWithEmailAndPassword(email, password);
+        const profile = {
+          name,
+          role,
+          email,
+          verified: false,
+          createdAt: new Date().toISOString()
+        };
+        await fbDb.collection('users').doc(cred.user.uid).set(profile);
+        return {
+          uid: cred.user.uid,
+          ...profile
+        };
+      }
+      const accts = lAccounts();
+      if (accts[email]) throw new Error('An account with that email already exists.');
+      const u = {
+        uid: 'local-' + email,
+        email,
+        name,
+        role,
+        verified: false,
+        _pw: password
+      };
+      accts[email] = u;
+      lSaveAccounts(accts);
+      const session = {
+        ...u
+      };
+      delete session._pw;
+      lSetSession(session);
+      return session;
+    },
+    async login({
+      email,
+      password
+    }) {
+      if (FIREBASE_READY) {
+        await fbAuth.signInWithEmailAndPassword(email, password);
+        return true;
+      }
+      const accts = lAccounts();
+      const u = accts[email];
+      if (!u || u._pw !== password) throw new Error('Wrong email or password.');
+      const session = {
+        ...u
+      };
+      delete session._pw;
+      lSetSession(session);
+      return session;
+    },
+    async logout() {
+      if (FIREBASE_READY) {
+        await fbAuth.signOut();
+        return;
+      }
+      lSetSession(null);
+    }
+  };
+}();
 
 /* ---------- MOCK DATA ---------- */
 
@@ -2753,6 +2929,158 @@ function ChatModal({
     disabled: !text.trim()
   }, "Send"))));
 }
+
+/* Sign up (with Host/Driver role) or log in. Works against Firebase when
+   configured, localStorage otherwise — same UI either way. */
+function AuthModal({
+  onClose,
+  onAuthed
+}) {
+  const [mode, setMode] = useState('signup'); // signup | login
+  const [role, setRole] = useState('driver');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function submit() {
+    setError('');
+    if (mode === 'signup' && !name.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+    if (!email.trim() || !password) {
+      setError('Email and password are required.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const user = mode === 'signup' ? await Auth.register({
+        email: email.trim(),
+        password,
+        name: name.trim(),
+        role
+      }) : await Auth.login({
+        email: email.trim(),
+        password
+      });
+      onAuthed(user === true ? null : user); // firebase login resolves via onChange
+    } catch (err) {
+      setError(err.message || 'Something went wrong.');
+    }
+    setBusy(false);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "overlay",
+    onClick: e => {
+      if (e.target === e.currentTarget) onClose();
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal",
+    style: {
+      maxWidth: 440
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "modal-close",
+    onClick: onClose
+  }, "\u2715"), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "auth-tabs"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "auth-tab" + (mode === 'signup' ? ' active' : ''),
+    onClick: () => {
+      setMode('signup');
+      setError('');
+    }
+  }, "Sign up"), /*#__PURE__*/React.createElement("button", {
+    className: "auth-tab" + (mode === 'login' ? ' active' : ''),
+    onClick: () => {
+      setMode('login');
+      setError('');
+    }
+  }, "Log in")), mode === 'signup' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+    className: "auth-label"
+  }, "I want to\u2026"), /*#__PURE__*/React.createElement("div", {
+    className: "role-picker"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "role-opt" + (role === 'driver' ? ' active' : ''),
+    onClick: () => setRole('driver')
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "role-emoji"
+  }, "\uD83D\uDE97"), /*#__PURE__*/React.createElement("span", {
+    className: "role-name"
+  }, "Find parking"), /*#__PURE__*/React.createElement("span", {
+    className: "role-sub"
+  }, "Driver")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "role-opt" + (role === 'host' ? ' active' : ''),
+    onClick: () => setRole('host')
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "role-emoji"
+  }, "\uD83C\uDFE0"), /*#__PURE__*/React.createElement("span", {
+    className: "role-name"
+  }, "Rent out a spot"), /*#__PURE__*/React.createElement("span", {
+    className: "role-sub"
+  }, "Host"))), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Full name"), /*#__PURE__*/React.createElement("input", {
+    value: name,
+    onChange: e => setName(e.target.value),
+    placeholder: "Juan dela Cruz"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Email"), /*#__PURE__*/React.createElement("input", {
+    type: "email",
+    value: email,
+    onChange: e => setEmail(e.target.value),
+    placeholder: "you@email.com"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Password"), /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    value: password,
+    onChange: e => setPassword(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter') submit();
+    },
+    placeholder: "At least 6 characters"
+  })), error && /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: 'var(--danger)',
+      fontSize: 13,
+      marginTop: 10
+    }
+  }, error), Auth.mode === 'local' && /*#__PURE__*/React.createElement("p", {
+    className: "muted",
+    style: {
+      fontSize: 11,
+      marginTop: 10
+    }
+  }, "\u26A0 Running in local demo mode \u2014 accounts are stored in this browser only. Firebase config not yet added."), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary",
+    style: {
+      marginTop: 14,
+      width: '100%'
+    },
+    disabled: busy,
+    onClick: submit
+  }, busy ? 'Please wait…' : mode === 'signup' ? `Create ${role} account` : 'Log in'))));
+}
 function App() {
   const [tab, setTab] = useState('browse');
   const [spots, setSpots] = useState(() => loadSpots() || SEEDED_SPOTS);
@@ -2765,6 +3093,19 @@ function App() {
   const [chatSpotId, setChatSpotId] = useState(null);
   const [showVerify, setShowVerify] = useState(false);
   const [chats, setChats] = useState(loadChats);
+  const [account, setAccount] = useState(null);
+  const [showAuth, setShowAuth] = useState(false);
+
+  // React to login/logout from either backend.
+  useEffect(() => {
+    const unsub = Auth.onChange(setAccount);
+    return unsub;
+  }, []);
+  async function handleLogout() {
+    await Auth.logout();
+    setAccount(null);
+    showToast('Logged out.');
+  }
   const selectedSpot = spots.find(s => s.id === selectedId) || null;
   const reviewSpot = spots.find(s => s.id === reviewSpotId) || null;
   const chatSpot = spots.find(s => s.id === chatSpotId) || null;
@@ -2845,13 +3186,20 @@ function App() {
     onClick: () => setTab('bookings')
   }, "My Bookings", bookings.length > 0 ? ` (${bookings.length})` : '')), /*#__PURE__*/React.createElement("div", {
     className: "navright"
-  }, profile.verified ? /*#__PURE__*/React.createElement("span", {
-    className: "verified-chip",
-    title: `Verified · ${profile.name}`
-  }, "\u2713 Verified") : /*#__PURE__*/React.createElement("button", {
+  }, account ? /*#__PURE__*/React.createElement("div", {
+    className: "account-box"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "account-chip",
+    title: account.email
+  }, account.role === 'host' ? '🏠' : '🚗', " ", account.name || account.email, profile.verified && /*#__PURE__*/React.createElement("span", {
+    className: "mini-verified"
+  }, "\u2713")), /*#__PURE__*/React.createElement("button", {
     className: "navcta ghost small",
-    onClick: () => setShowVerify(true)
-  }, "Verify profile"), /*#__PURE__*/React.createElement("button", {
+    onClick: handleLogout
+  }, "Log out")) : /*#__PURE__*/React.createElement("button", {
+    className: "navcta ghost small",
+    onClick: () => setShowAuth(true)
+  }, "Log in / Sign up"), (!account || account.role === 'host') && /*#__PURE__*/React.createElement("button", {
     className: "navcta ghost",
     onClick: () => setTab('host')
   }, "List your spot"))), /*#__PURE__*/React.createElement("main", null, tab === 'browse' && /*#__PURE__*/React.createElement(BrowseView, {
@@ -2904,6 +3252,13 @@ function App() {
     profile: profile,
     onClose: () => setShowVerify(false),
     onVerified: handleVerified
+  }), showAuth && /*#__PURE__*/React.createElement(AuthModal, {
+    onClose: () => setShowAuth(false),
+    onAuthed: user => {
+      if (user) setAccount(user);
+      setShowAuth(false);
+      showToast('Welcome to ParkKo! 🎉');
+    }
   }), reviewSpot && /*#__PURE__*/React.createElement(ReviewModal, {
     spot: reviewSpot,
     onClose: () => setReviewSpotId(null),

@@ -1,5 +1,96 @@
 const {useState,useEffect,useRef,useMemo} = React;
 
+/* ---------- FIREBASE (accounts + database) ----------
+   Real host/driver accounts and a shared database. The whole integration
+   sits behind the Auth object below, so the UI never calls Firebase directly
+   and the app still runs (on localStorage) when Firebase isn't configured.
+
+   TO ACTIVATE: paste the firebaseConfig from
+   Firebase Console → Project Settings → General → Your apps → Config
+   into FIREBASE_CONFIG. Until apiKey is filled, the app runs in local mode. */
+
+const FIREBASE_CONFIG = {
+  apiKey: "",              // <-- paste from console
+  authDomain: "parkko-5b9ac.firebaseapp.com",
+  projectId: "parkko-5b9ac",
+  storageBucket: "parkko-5b9ac.firebasestorage.app",
+  messagingSenderId: "", // <-- paste from console
+  appId: "",             // <-- paste from console
+};
+
+const FIREBASE_READY = !!FIREBASE_CONFIG.apiKey && typeof firebase !== 'undefined';
+
+/* Auth abstraction. Firebase when configured; a localStorage stand-in
+   otherwise so registration/login still demo without a backend. Both expose
+   the same surface: current(), onChange(), register(), login(), logout(). */
+
+const Auth = (function(){
+  let fb = null, fbAuth = null, fbDb = null;
+
+  if(FIREBASE_READY){
+    fb = firebase.initializeApp(FIREBASE_CONFIG);
+    fbAuth = firebase.auth();
+    fbDb = firebase.firestore();
+  }
+
+  // ----- localStorage fallback -----
+  const LKEY = 'parkko_accounts', SKEY = 'parkko_session';
+  function lAccounts(){ try { return JSON.parse(localStorage.getItem(LKEY)||'{}'); } catch(e){ return {}; } }
+  function lSaveAccounts(a){ try { localStorage.setItem(LKEY, JSON.stringify(a)); } catch(e){} }
+  function lSession(){ try { return JSON.parse(localStorage.getItem(SKEY)||'null'); } catch(e){ return null; } }
+  function lSetSession(u){ try { u ? localStorage.setItem(SKEY, JSON.stringify(u)) : localStorage.removeItem(SKEY); } catch(e){} }
+
+  return {
+    mode: FIREBASE_READY ? 'firebase' : 'local',
+
+    onChange(cb){
+      if(FIREBASE_READY){
+        return fbAuth.onAuthStateChanged(async (u)=>{
+          if(!u){ cb(null); return; }
+          let profile = {};
+          try { const snap = await fbDb.collection('users').doc(u.uid).get(); profile = snap.exists ? snap.data() : {}; }
+          catch(e){}
+          cb({uid:u.uid, email:u.email, ...profile});
+        });
+      }
+      cb(lSession());
+      return ()=>{};
+    },
+
+    async register({email, password, name, role}){
+      if(FIREBASE_READY){
+        const cred = await fbAuth.createUserWithEmailAndPassword(email, password);
+        const profile = {name, role, email, verified:false, createdAt:new Date().toISOString()};
+        await fbDb.collection('users').doc(cred.user.uid).set(profile);
+        return {uid:cred.user.uid, ...profile};
+      }
+      const accts = lAccounts();
+      if(accts[email]) throw new Error('An account with that email already exists.');
+      const u = {uid:'local-'+email, email, name, role, verified:false, _pw:password};
+      accts[email] = u; lSaveAccounts(accts);
+      const session = {...u}; delete session._pw; lSetSession(session);
+      return session;
+    },
+
+    async login({email, password}){
+      if(FIREBASE_READY){
+        await fbAuth.signInWithEmailAndPassword(email, password);
+        return true;
+      }
+      const accts = lAccounts();
+      const u = accts[email];
+      if(!u || u._pw!==password) throw new Error('Wrong email or password.');
+      const session = {...u}; delete session._pw; lSetSession(session);
+      return session;
+    },
+
+    async logout(){
+      if(FIREBASE_READY){ await fbAuth.signOut(); return; }
+      lSetSession(null);
+    },
+  };
+})();
+
 /* ---------- MOCK DATA ---------- */
 
 const AMENITY_LABELS = {
@@ -1345,6 +1436,88 @@ function ChatModal({spot, profile, thread, onClose, onSend, onRequestVerify}){
   );
 }
 
+/* Sign up (with Host/Driver role) or log in. Works against Firebase when
+   configured, localStorage otherwise — same UI either way. */
+function AuthModal({onClose, onAuthed}){
+  const [mode,setMode] = useState('signup'); // signup | login
+  const [role,setRole] = useState('driver');
+  const [name,setName] = useState('');
+  const [email,setEmail] = useState('');
+  const [password,setPassword] = useState('');
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState('');
+
+  async function submit(){
+    setError('');
+    if(mode==='signup' && !name.trim()){ setError('Please enter your name.'); return; }
+    if(!email.trim() || !password){ setError('Email and password are required.'); return; }
+    if(password.length<6){ setError('Password must be at least 6 characters.'); return; }
+    setBusy(true);
+    try {
+      const user = mode==='signup'
+        ? await Auth.register({email:email.trim(), password, name:name.trim(), role})
+        : await Auth.login({email:email.trim(), password});
+      onAuthed(user===true ? null : user); // firebase login resolves via onChange
+    } catch(err){
+      setError(err.message || 'Something went wrong.');
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="overlay" onClick={e=>{if(e.target===e.currentTarget) onClose();}}>
+      <div className="modal" style={{maxWidth:440}}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-body">
+          <div className="auth-tabs">
+            <button className={"auth-tab"+(mode==='signup'?' active':'')} onClick={()=>{setMode('signup');setError('');}}>Sign up</button>
+            <button className={"auth-tab"+(mode==='login'?' active':'')} onClick={()=>{setMode('login');setError('');}}>Log in</button>
+          </div>
+
+          {mode==='signup' && (
+            <React.Fragment>
+              <label className="auth-label">I want to…</label>
+              <div className="role-picker">
+                <button type="button" className={"role-opt"+(role==='driver'?' active':'')} onClick={()=>setRole('driver')}>
+                  <span className="role-emoji">🚗</span>
+                  <span className="role-name">Find parking</span>
+                  <span className="role-sub">Driver</span>
+                </button>
+                <button type="button" className={"role-opt"+(role==='host'?' active':'')} onClick={()=>setRole('host')}>
+                  <span className="role-emoji">🏠</span>
+                  <span className="role-name">Rent out a spot</span>
+                  <span className="role-sub">Host</span>
+                </button>
+              </div>
+              <div className="field" style={{marginTop:12}}>
+                <label>Full name</label>
+                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Juan dela Cruz" />
+              </div>
+            </React.Fragment>
+          )}
+
+          <div className="field" style={{marginTop:12}}>
+            <label>Email</label>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com" />
+          </div>
+          <div className="field" style={{marginTop:12}}>
+            <label>Password</label>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)}
+              onKeyDown={e=>{if(e.key==='Enter') submit();}} placeholder="At least 6 characters" />
+          </div>
+
+          {error && <p style={{color:'var(--danger)',fontSize:13,marginTop:10}}>{error}</p>}
+          {Auth.mode==='local' && <p className="muted" style={{fontSize:11,marginTop:10}}>⚠ Running in local demo mode — accounts are stored in this browser only. Firebase config not yet added.</p>}
+
+          <button className="btn-primary" style={{marginTop:14,width:'100%'}} disabled={busy} onClick={submit}>
+            {busy ? 'Please wait…' : (mode==='signup' ? `Create ${role} account` : 'Log in')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [tab,setTab] = useState('browse');
   const [spots,setSpots] = useState(()=> loadSpots() || SEEDED_SPOTS);
@@ -1357,6 +1530,20 @@ function App(){
   const [chatSpotId,setChatSpotId] = useState(null);
   const [showVerify,setShowVerify] = useState(false);
   const [chats,setChats] = useState(loadChats);
+  const [account,setAccount] = useState(null);
+  const [showAuth,setShowAuth] = useState(false);
+
+  // React to login/logout from either backend.
+  useEffect(()=>{
+    const unsub = Auth.onChange(setAccount);
+    return unsub;
+  },[]);
+
+  async function handleLogout(){
+    await Auth.logout();
+    setAccount(null);
+    showToast('Logged out.');
+  }
 
   const selectedSpot = spots.find(s=>s.id===selectedId) || null;
   const reviewSpot = spots.find(s=>s.id===reviewSpotId) || null;
@@ -1416,10 +1603,19 @@ function App(){
           <button className={"navtab"+(tab==='bookings'?' active':'')} onClick={()=>setTab('bookings')}>My Bookings{bookings.length>0?` (${bookings.length})`:''}</button>
         </div>
         <div className="navright">
-          {profile.verified
-            ? <span className="verified-chip" title={`Verified · ${profile.name}`}>✓ Verified</span>
-            : <button className="navcta ghost small" onClick={()=>setShowVerify(true)}>Verify profile</button>}
-          <button className={"navcta ghost"} onClick={()=>setTab('host')}>List your spot</button>
+          {account ? (
+            <div className="account-box">
+              <span className="account-chip" title={account.email}>
+                {account.role==='host' ? '🏠' : '🚗'} {account.name || account.email}
+                {profile.verified && <span className="mini-verified">✓</span>}
+              </span>
+              <button className="navcta ghost small" onClick={handleLogout}>Log out</button>
+            </div>
+          ) : (
+            <button className="navcta ghost small" onClick={()=>setShowAuth(true)}>Log in / Sign up</button>
+          )}
+          {(!account || account.role==='host') &&
+            <button className={"navcta ghost"} onClick={()=>setTab('host')}>List your spot</button>}
         </div>
       </div>
 
@@ -1467,6 +1663,12 @@ function App(){
           profile={profile}
           onClose={()=>setShowVerify(false)}
           onVerified={handleVerified}
+        />
+      )}
+      {showAuth && (
+        <AuthModal
+          onClose={()=>setShowAuth(false)}
+          onAuthed={(user)=>{ if(user) setAccount(user); setShowAuth(false); showToast('Welcome to ParkKo! 🎉'); }}
         />
       )}
       {reviewSpot && (
