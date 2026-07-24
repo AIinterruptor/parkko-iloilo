@@ -102,6 +102,24 @@
     position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;
     font-weight:700;padding:3px 9px;border-radius:999px;backdrop-filter:blur(4px);
   }
+  .plan-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px;}
+  .plan-tab{
+    position:relative;padding:10px 6px 9px;border-radius:12px;border:2px solid var(--line);background:#fff;
+    cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:.15s;
+  }
+  .plan-tab:hover{border-color:#99f6e4;background:#f0fdfa;}
+  .plan-tab.active{border-color:var(--brand);background:#f0fdfa;box-shadow:0 0 0 3px rgba(15,118,110,.1);}
+  .plan-name{font-size:12px;font-weight:800;color:var(--ink);}
+  .plan-rate{font-size:12px;font-weight:700;color:var(--brand);}
+  .plan-save{
+    position:absolute;top:-8px;right:-4px;background:#15803d;color:#fff;font-size:9px;font-weight:800;
+    padding:2px 6px;border-radius:999px;letter-spacing:.02em;
+  }
+  @media (max-width:520px){
+    .plan-tabs{grid-template-columns:repeat(2,1fr);}
+  }
+  .rate-strip{display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px;}
+  .rate-strip b{color:var(--ink);font-weight:800;}
   .photo-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;}
   .photo-thumb{
     position:relative;width:96px;height:96px;border-radius:12px;overflow:hidden;
@@ -558,6 +576,47 @@ const AMENITY_LABELS = {
   wide:{icon:'🚙',label:'SUV / Van friendly'},
 };
 
+/* ---------- RENTAL PERIODS ----------
+   Hosts price by the hour; longer stays derive from that with a discount,
+   the way real lots price monthly cheaper than 720 separate hours. */
+
+const RATE_PLANS = [
+  {key:'hour',  label:'Hourly',  unit:'hour',  suffix:'/hr',    multiplier:1,   discount:0    },
+  {key:'day',   label:'Daily',   unit:'day',   suffix:'/day',   multiplier:10,  discount:0.15 },
+  {key:'week',  label:'Weekly',  unit:'week',  suffix:'/week',  multiplier:60,  discount:0.25 },
+  {key:'month', label:'Monthly', unit:'month', suffix:'/month', multiplier:220, discount:0.35 },
+];
+
+function planByKey(key){ return RATE_PLANS.find(p=>p.key===key) || RATE_PLANS[0]; }
+
+/* Rate for one unit of the given plan, rounded to a clean peso figure. */
+function rateFor(spot, planKey){
+  const plan = planByKey(planKey);
+  const raw = spot.price * plan.multiplier * (1 - plan.discount);
+  if(plan.key==='hour') return spot.price;
+  return Math.round(raw/5)*5;
+}
+
+function savingsPct(spot, planKey){
+  const plan = planByKey(planKey);
+  if(plan.key==='hour') return 0;
+  const undiscounted = spot.price * plan.multiplier;
+  return Math.round((1 - rateFor(spot,planKey)/undiscounted) * 100);
+}
+
+/* ---------- SAMPLE LISTING PHOTOS ----------
+   Inline SVG scenes so the seeded listings look like real listings.
+   Kept as data URIs to preserve the single-file, offline-capable design. */
+
+const SAMPLE_PHOTOS = {
+  garage: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc4MDAnIGhlaWdodD0nNjAwJyB2aWV3Qm94PScwIDAgODAwIDYwMCc+PHJlY3Qgd2lkdGg9JzgwMCcgaGVpZ2h0PSc2MDAnIGZpbGw9JyM0NzU1NjknLz48cmVjdCB4PScwJyB5PScwJyB3aWR0aD0nODAwJyBoZWlnaHQ9JzMzMCcgZmlsbD0nIzMzNDE1NScvPjxyZWN0IHg9JzAnIHk9JzMwMCcgd2lkdGg9JzgwMCcgaGVpZ2h0PSczMDAnIGZpbGw9JyM2YjcyODAnLz48cmVjdCB4PSc0MCcgeT0nNjAnIHdpZHRoPSc3MjAnIGhlaWdodD0nNDAnIHJ4PSc2JyBmaWxsPScjMWUyOTNiJy8+PHJlY3QgeD0nNzAnIHk9JzEwMCcgd2lkdGg9JzMwJyBoZWlnaHQ9JzIxMCcgZmlsbD0nIzQ3NTU2OScvPjxyZWN0IHg9JzcwMCcgeT0nMTAwJyB3aWR0aD0nMzAnIGhlaWdodD0nMjEwJyBmaWxsPScjNDc1NTY5Jy8+PHJlY3QgeD0nMTIwJyB5PSczMzAnIHdpZHRoPSc1NjAnIGhlaWdodD0nOCcgZmlsbD0nI2Y4ZmFmYycgb3BhY2l0eT0nLjc1Jy8+PGxpbmUgeDE9JzQwMCcgeTE9JzMzOCcgeDI9JzQwMCcgeTI9JzYwMCcgc3Ryb2tlPScjZjhmYWZjJyBzdHJva2Utd2lkdGg9JzcnIG9wYWNpdHk9Jy41NScgc3Ryb2tlLWRhc2hhcnJheT0nMzQgMjYnLz48ZyB0cmFuc2Zvcm09J3RyYW5zbGF0ZSgxODAsMzUwKSBzY2FsZSgxLjUpJz48cmVjdCB4PScwJyB5PScxOCcgd2lkdGg9JzEyMCcgaGVpZ2h0PSczNCcgcng9JzknIGZpbGw9JyMwZjc2NmUnLz48cGF0aCBkPSdNMTggMTggTDM0IDIgTDg2IDIgTDEwMiAxOCBaJyBmaWxsPScjMGY3NjZlJyBvcGFjaXR5PScuODUnLz48cmVjdCB4PSczNicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48cmVjdCB4PSc2MicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48Y2lyY2xlIGN4PScyOCcgY3k9JzU0JyByPScxMScgZmlsbD0nIzFmMjkzNycvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzQuNScgZmlsbD0nIzljYTNhZicvPjxjaXJjbGUgY3g9JzkyJyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PC9nPjxnIHRyYW5zZm9ybT0ndHJhbnNsYXRlKDQ3MCwzNTApIHNjYWxlKDEuNSknPjxyZWN0IHg9JzAnIHk9JzE4JyB3aWR0aD0nMTIwJyBoZWlnaHQ9JzM0JyByeD0nOScgZmlsbD0nI2UyZThmMCcvPjxwYXRoIGQ9J00xOCAxOCBMMzQgMiBMODYgMiBMMTAyIDE4IFonIGZpbGw9JyNlMmU4ZjAnIG9wYWNpdHk9Jy44NScvPjxyZWN0IHg9JzM2JyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxyZWN0IHg9JzYyJyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nMjgnIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nMTEnIGZpbGw9JyMxZjI5MzcnLz48Y2lyY2xlIGN4PSc5MicgY3k9JzU0JyByPSc0LjUnIGZpbGw9JyM5Y2EzYWYnLz48L2c+PHJlY3QgeD0nMzMwJyB5PScxNTAnIHdpZHRoPScxNDAnIGhlaWdodD0nNzAnIHJ4PScxMCcgZmlsbD0nIzBmNzY2ZScvPjx0ZXh0IHg9JzQwMCcgeT0nMjAyJyBmb250LWZhbWlseT0nQXJpYWwnIGZvbnQtc2l6ZT0nNTInIGZvbnQtd2VpZ2h0PSdib2xkJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5QPC90ZXh0Pjwvc3ZnPg==',
+  openlot: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc4MDAnIGhlaWdodD0nNjAwJyB2aWV3Qm94PScwIDAgODAwIDYwMCc+PHJlY3Qgd2lkdGg9JzgwMCcgaGVpZ2h0PSc2MDAnIGZpbGw9JyM5Y2EzYWYnLz48cmVjdCB4PScwJyB5PScwJyB3aWR0aD0nODAwJyBoZWlnaHQ9JzI1MCcgZmlsbD0nIzdkZDNmYycvPjxjaXJjbGUgY3g9JzY1MCcgY3k9JzgwJyByPSc0NicgZmlsbD0nI2ZkZTY4YScvPjxyZWN0IHg9JzAnIHk9JzI1MCcgd2lkdGg9JzgwMCcgaGVpZ2h0PSczNTAnIGZpbGw9JyM5Y2EzYWYnLz48cmVjdCB4PScwJyB5PScyMzAnIHdpZHRoPSc4MDAnIGhlaWdodD0nMjYnIGZpbGw9JyM0YjU1NjMnLz48bGluZSB4MT0nNjAnIHkxPScyNjAnIHgyPSc0MCcgeTI9JzU5MCcgc3Ryb2tlPScjZjlmYWZiJyBzdHJva2Utd2lkdGg9JzcnIG9wYWNpdHk9Jy44Jy8+PGxpbmUgeDE9JzI0MCcgeTE9JzI2MCcgeDI9JzIyMCcgeTI9JzU5MCcgc3Ryb2tlPScjZjlmYWZiJyBzdHJva2Utd2lkdGg9JzcnIG9wYWNpdHk9Jy44Jy8+PGxpbmUgeDE9JzQyMCcgeTE9JzI2MCcgeDI9JzQwMCcgeTI9JzU5MCcgc3Ryb2tlPScjZjlmYWZiJyBzdHJva2Utd2lkdGg9JzcnIG9wYWNpdHk9Jy44Jy8+PGxpbmUgeDE9JzYwMCcgeTE9JzI2MCcgeDI9JzU4MCcgeTI9JzU5MCcgc3Ryb2tlPScjZjlmYWZiJyBzdHJva2Utd2lkdGg9JzcnIG9wYWNpdHk9Jy44Jy8+PGcgdHJhbnNmb3JtPSd0cmFuc2xhdGUoOTAsMzAwKSBzY2FsZSgxLjQpJz48cmVjdCB4PScwJyB5PScxOCcgd2lkdGg9JzEyMCcgaGVpZ2h0PSczNCcgcng9JzknIGZpbGw9JyNkYzI2MjYnLz48cGF0aCBkPSdNMTggMTggTDM0IDIgTDg2IDIgTDEwMiAxOCBaJyBmaWxsPScjZGMyNjI2JyBvcGFjaXR5PScuODUnLz48cmVjdCB4PSczNicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48cmVjdCB4PSc2MicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48Y2lyY2xlIGN4PScyOCcgY3k9JzU0JyByPScxMScgZmlsbD0nIzFmMjkzNycvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzQuNScgZmlsbD0nIzljYTNhZicvPjxjaXJjbGUgY3g9JzkyJyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PC9nPjxnIHRyYW5zZm9ybT0ndHJhbnNsYXRlKDMwMCwzODApIHNjYWxlKDEuNiknPjxyZWN0IHg9JzAnIHk9JzE4JyB3aWR0aD0nMTIwJyBoZWlnaHQ9JzM0JyByeD0nOScgZmlsbD0nIzFkNGVkOCcvPjxwYXRoIGQ9J00xOCAxOCBMMzQgMiBMODYgMiBMMTAyIDE4IFonIGZpbGw9JyMxZDRlZDgnIG9wYWNpdHk9Jy44NScvPjxyZWN0IHg9JzM2JyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxyZWN0IHg9JzYyJyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nMjgnIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nMTEnIGZpbGw9JyMxZjI5MzcnLz48Y2lyY2xlIGN4PSc5MicgY3k9JzU0JyByPSc0LjUnIGZpbGw9JyM5Y2EzYWYnLz48L2c+PGcgdHJhbnNmb3JtPSd0cmFuc2xhdGUoNTIwLDMwMCkgc2NhbGUoMS40KSc+PHJlY3QgeD0nMCcgeT0nMTgnIHdpZHRoPScxMjAnIGhlaWdodD0nMzQnIHJ4PSc5JyBmaWxsPScjZjhmYWZjJy8+PHBhdGggZD0nTTE4IDE4IEwzNCAyIEw4NiAyIEwxMDIgMTggWicgZmlsbD0nI2Y4ZmFmYycgb3BhY2l0eT0nLjg1Jy8+PHJlY3QgeD0nMzYnIHk9JzUnIHdpZHRoPScyMicgaGVpZ2h0PScxMycgcng9JzMnIGZpbGw9JyNjZmU4ZjUnIG9wYWNpdHk9Jy45Jy8+PHJlY3QgeD0nNjInIHk9JzUnIHdpZHRoPScyMicgaGVpZ2h0PScxMycgcng9JzMnIGZpbGw9JyNjZmU4ZjUnIG9wYWNpdHk9Jy45Jy8+PGNpcmNsZSBjeD0nMjgnIGN5PSc1NCcgcj0nMTEnIGZpbGw9JyMxZjI5MzcnLz48Y2lyY2xlIGN4PScyOCcgY3k9JzU0JyByPSc0LjUnIGZpbGw9JyM5Y2EzYWYnLz48Y2lyY2xlIGN4PSc5MicgY3k9JzU0JyByPScxMScgZmlsbD0nIzFmMjkzNycvPjxjaXJjbGUgY3g9JzkyJyBjeT0nNTQnIHI9JzQuNScgZmlsbD0nIzljYTNhZicvPjwvZz48cmVjdCB4PSczMCcgeT0nMTIwJyB3aWR0aD0nMTYnIGhlaWdodD0nMTIwJyBmaWxsPScjMzc0MTUxJy8+PHJlY3QgeD0nMTAnIHk9JzEwNCcgd2lkdGg9JzU2JyBoZWlnaHQ9JzIyJyByeD0nNScgZmlsbD0nIzBmNzY2ZScvPjwvc3ZnPg==',
+  driveway: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc4MDAnIGhlaWdodD0nNjAwJyB2aWV3Qm94PScwIDAgODAwIDYwMCc+PHJlY3Qgd2lkdGg9JzgwMCcgaGVpZ2h0PSc2MDAnIGZpbGw9JyM4NmVmYWMnLz48cmVjdCB4PScwJyB5PScwJyB3aWR0aD0nODAwJyBoZWlnaHQ9JzMwMCcgZmlsbD0nI2JhZTZmZCcvPjxyZWN0IHg9JzAnIHk9JzI4MCcgd2lkdGg9JzgwMCcgaGVpZ2h0PSczMjAnIGZpbGw9JyM4NmVmYWMnLz48cGF0aCBkPSdNMzAwIDMwMCBMNTAwIDMwMCBMNTYwIDYwMCBMMjQwIDYwMCBaJyBmaWxsPScjZDZkM2QxJy8+PHJlY3QgeD0nNDMwJyB5PSc5MCcgd2lkdGg9JzMzMCcgaGVpZ2h0PScyMTAnIGZpbGw9JyNmZWYzYzcnLz48cGF0aCBkPSdNNDEwIDk1IEw1OTUgMTAgTDc4MCA5NSBaJyBmaWxsPScjYjQ1MzA5Jy8+PHJlY3QgeD0nNDcwJyB5PScxNTAnIHdpZHRoPSc3MCcgaGVpZ2h0PSc3MCcgcng9JzQnIGZpbGw9JyM5M2M1ZmQnLz48cmVjdCB4PSc2NDAnIHk9JzE1MCcgd2lkdGg9JzcwJyBoZWlnaHQ9JzcwJyByeD0nNCcgZmlsbD0nIzkzYzVmZCcvPjxyZWN0IHg9JzU2MCcgeT0nMjE1JyB3aWR0aD0nNTgnIGhlaWdodD0nODUnIGZpbGw9JyM3YzJkMTInLz48ZyB0cmFuc2Zvcm09J3RyYW5zbGF0ZSgzMDAsMzgwKSBzY2FsZSgxLjcpJz48cmVjdCB4PScwJyB5PScxOCcgd2lkdGg9JzEyMCcgaGVpZ2h0PSczNCcgcng9JzknIGZpbGw9JyMwODkxYjInLz48cGF0aCBkPSdNMTggMTggTDM0IDIgTDg2IDIgTDEwMiAxOCBaJyBmaWxsPScjMDg5MWIyJyBvcGFjaXR5PScuODUnLz48cmVjdCB4PSczNicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48cmVjdCB4PSc2MicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48Y2lyY2xlIGN4PScyOCcgY3k9JzU0JyByPScxMScgZmlsbD0nIzFmMjkzNycvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzQuNScgZmlsbD0nIzljYTNhZicvPjxjaXJjbGUgY3g9JzkyJyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PC9nPjxyZWN0IHg9JzYwJyB5PSczMzAnIHdpZHRoPSczMCcgaGVpZ2h0PScxMjAnIGZpbGw9JyM3ODM1MGYnLz48Y2lyY2xlIGN4PSc3NScgY3k9JzMwMCcgcj0nNjgnIGZpbGw9JyMxNTgwM2QnLz48L3N2Zz4=',
+  gated: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc4MDAnIGhlaWdodD0nNjAwJyB2aWV3Qm94PScwIDAgODAwIDYwMCc+PHJlY3Qgd2lkdGg9JzgwMCcgaGVpZ2h0PSc2MDAnIGZpbGw9JyM1NzUzNGUnLz48cmVjdCB4PScwJyB5PScwJyB3aWR0aD0nODAwJyBoZWlnaHQ9JzI2MCcgZmlsbD0nIzBjNGE2ZScvPjxyZWN0IHg9JzAnIHk9JzI1MCcgd2lkdGg9JzgwMCcgaGVpZ2h0PSczNTAnIGZpbGw9JyM1NzUzNGUnLz48bGluZSB4MT0nMTAwJyB5MT0nMjcwJyB4Mj0nODUnIHkyPSc1OTAnIHN0cm9rZT0nI2ZiYmYyNCcgc3Ryb2tlLXdpZHRoPSc2JyBvcGFjaXR5PScuNzUnLz48bGluZSB4MT0nMzAwJyB5MT0nMjcwJyB4Mj0nMjg1JyB5Mj0nNTkwJyBzdHJva2U9JyNmYmJmMjQnIHN0cm9rZS13aWR0aD0nNicgb3BhY2l0eT0nLjc1Jy8+PGxpbmUgeDE9JzUwMCcgeTE9JzI3MCcgeDI9JzQ4NScgeTI9JzU5MCcgc3Ryb2tlPScjZmJiZjI0JyBzdHJva2Utd2lkdGg9JzYnIG9wYWNpdHk9Jy43NScvPjxsaW5lIHgxPSc3MDAnIHkxPScyNzAnIHgyPSc2ODUnIHkyPSc1OTAnIHN0cm9rZT0nI2ZiYmYyNCcgc3Ryb2tlLXdpZHRoPSc2JyBvcGFjaXR5PScuNzUnLz48cmVjdCB4PSc0MCcgeT0nMTIwJyB3aWR0aD0nMTQwJyBoZWlnaHQ9JzE0MCcgZmlsbD0nIzMzNDE1NScvPjxyZWN0IHg9JzYwJyB5PScxNTAnIHdpZHRoPScxMDAnIGhlaWdodD0nNjAnIHJ4PSc0JyBmaWxsPScjZmRlNjhhJy8+PHJlY3QgeD0nMjAwJyB5PScxOTAnIHdpZHRoPSc0MjAnIGhlaWdodD0nMTQnIHJ4PSc2JyBmaWxsPScjZWY0NDQ0Jy8+PHJlY3QgeD0nMjIwJyB5PScxOTAnIHdpZHRoPSczMCcgaGVpZ2h0PScxNCcgZmlsbD0nI2Y4ZmFmYycvPjxyZWN0IHg9JzMwMCcgeT0nMTkwJyB3aWR0aD0nMzAnIGhlaWdodD0nMTQnIGZpbGw9JyNmOGZhZmMnLz48cmVjdCB4PSczODAnIHk9JzE5MCcgd2lkdGg9JzMwJyBoZWlnaHQ9JzE0JyBmaWxsPScjZjhmYWZjJy8+PHJlY3QgeD0nNDYwJyB5PScxOTAnIHdpZHRoPSczMCcgaGVpZ2h0PScxNCcgZmlsbD0nI2Y4ZmFmYycvPjxyZWN0IHg9JzU0MCcgeT0nMTkwJyB3aWR0aD0nMzAnIGhlaWdodD0nMTQnIGZpbGw9JyNmOGZhZmMnLz48cmVjdCB4PSc2MjAnIHk9JzE1MCcgd2lkdGg9JzE4JyBoZWlnaHQ9JzEyMCcgZmlsbD0nIzMzNDE1NScvPjxnIHRyYW5zZm9ybT0ndHJhbnNsYXRlKDI4MCwzNjApIHNjYWxlKDEuNiknPjxyZWN0IHg9JzAnIHk9JzE4JyB3aWR0aD0nMTIwJyBoZWlnaHQ9JzM0JyByeD0nOScgZmlsbD0nI2Y4ZmFmYycvPjxwYXRoIGQ9J00xOCAxOCBMMzQgMiBMODYgMiBMMTAyIDE4IFonIGZpbGw9JyNmOGZhZmMnIG9wYWNpdHk9Jy44NScvPjxyZWN0IHg9JzM2JyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxyZWN0IHg9JzYyJyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nMjgnIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nMTEnIGZpbGw9JyMxZjI5MzcnLz48Y2lyY2xlIGN4PSc5MicgY3k9JzU0JyByPSc0LjUnIGZpbGw9JyM5Y2EzYWYnLz48L2c+PGcgdHJhbnNmb3JtPSd0cmFuc2xhdGUoNTIwLDQwMCkgc2NhbGUoMS41KSc+PHJlY3QgeD0nMCcgeT0nMTgnIHdpZHRoPScxMjAnIGhlaWdodD0nMzQnIHJ4PSc5JyBmaWxsPScjMzM0MTU1Jy8+PHBhdGggZD0nTTE4IDE4IEwzNCAyIEw4NiAyIEwxMDIgMTggWicgZmlsbD0nIzMzNDE1NScgb3BhY2l0eT0nLjg1Jy8+PHJlY3QgeD0nMzYnIHk9JzUnIHdpZHRoPScyMicgaGVpZ2h0PScxMycgcng9JzMnIGZpbGw9JyNjZmU4ZjUnIG9wYWNpdHk9Jy45Jy8+PHJlY3QgeD0nNjInIHk9JzUnIHdpZHRoPScyMicgaGVpZ2h0PScxMycgcng9JzMnIGZpbGw9JyNjZmU4ZjUnIG9wYWNpdHk9Jy45Jy8+PGNpcmNsZSBjeD0nMjgnIGN5PSc1NCcgcj0nMTEnIGZpbGw9JyMxZjI5MzcnLz48Y2lyY2xlIGN4PScyOCcgY3k9JzU0JyByPSc0LjUnIGZpbGw9JyM5Y2EzYWYnLz48Y2lyY2xlIGN4PSc5MicgY3k9JzU0JyByPScxMScgZmlsbD0nIzFmMjkzNycvPjxjaXJjbGUgY3g9JzkyJyBjeT0nNTQnIHI9JzQuNScgZmlsbD0nIzljYTNhZicvPjwvZz48Y2lyY2xlIGN4PScxMTAnIGN5PSc5NScgcj0nMTYnIGZpbGw9JyMyMmM1NWUnLz48L3N2Zz4=',
+  street: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc4MDAnIGhlaWdodD0nNjAwJyB2aWV3Qm94PScwIDAgODAwIDYwMCc+PHJlY3Qgd2lkdGg9JzgwMCcgaGVpZ2h0PSc2MDAnIGZpbGw9JyM0YjU1NjMnLz48cmVjdCB4PScwJyB5PScwJyB3aWR0aD0nODAwJyBoZWlnaHQ9JzI0MCcgZmlsbD0nI2E1YjRmYycvPjxyZWN0IHg9JzAnIHk9JzIwMCcgd2lkdGg9JzgwMCcgaGVpZ2h0PSc2MCcgZmlsbD0nIzZiNzI4MCcvPjxyZWN0IHg9JzAnIHk9JzI1MCcgd2lkdGg9JzgwMCcgaGVpZ2h0PSczNTAnIGZpbGw9JyM0YjU1NjMnLz48cmVjdCB4PScwJyB5PScyNTAnIHdpZHRoPSc4MDAnIGhlaWdodD0nMTYnIGZpbGw9JyNlNWU3ZWInLz48bGluZSB4MT0nMCcgeTE9JzQzMCcgeDI9JzgwMCcgeTI9JzQzMCcgc3Ryb2tlPScjZmJiZjI0JyBzdHJva2Utd2lkdGg9JzgnIHN0cm9rZS1kYXNoYXJyYXk9JzYwIDQwJy8+PHJlY3QgeD0nNjAnIHk9JzgwJyB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEyNScgZmlsbD0nI2ZjYTVhNScvPjxyZWN0IHg9JzIyMCcgeT0nODAnIHdpZHRoPScxMDAnIGhlaWdodD0nMTI1JyBmaWxsPScjZmRiYTc0Jy8+PHJlY3QgeD0nMzgwJyB5PSc4MCcgd2lkdGg9JzEwMCcgaGVpZ2h0PScxMjUnIGZpbGw9JyNhN2YzZDAnLz48ZyB0cmFuc2Zvcm09J3RyYW5zbGF0ZSgxMjAsMjkwKSBzY2FsZSgxLjUpJz48cmVjdCB4PScwJyB5PScxOCcgd2lkdGg9JzEyMCcgaGVpZ2h0PSczNCcgcng9JzknIGZpbGw9JyM3YzNhZWQnLz48cGF0aCBkPSdNMTggMTggTDM0IDIgTDg2IDIgTDEwMiAxOCBaJyBmaWxsPScjN2MzYWVkJyBvcGFjaXR5PScuODUnLz48cmVjdCB4PSczNicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48cmVjdCB4PSc2MicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48Y2lyY2xlIGN4PScyOCcgY3k9JzU0JyByPScxMScgZmlsbD0nIzFmMjkzNycvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzQuNScgZmlsbD0nIzljYTNhZicvPjxjaXJjbGUgY3g9JzkyJyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PC9nPjxnIHRyYW5zZm9ybT0ndHJhbnNsYXRlKDQyMCwyOTApIHNjYWxlKDEuNSknPjxyZWN0IHg9JzAnIHk9JzE4JyB3aWR0aD0nMTIwJyBoZWlnaHQ9JzM0JyByeD0nOScgZmlsbD0nI2Y1OWUwYicvPjxwYXRoIGQ9J00xOCAxOCBMMzQgMiBMODYgMiBMMTAyIDE4IFonIGZpbGw9JyNmNTllMGInIG9wYWNpdHk9Jy44NScvPjxyZWN0IHg9JzM2JyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxyZWN0IHg9JzYyJyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nMjgnIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nMTEnIGZpbGw9JyMxZjI5MzcnLz48Y2lyY2xlIGN4PSc5MicgY3k9JzU0JyByPSc0LjUnIGZpbGw9JyM5Y2EzYWYnLz48L2c+PHJlY3QgeD0nNzAwJyB5PScxNTAnIHdpZHRoPScxMicgaGVpZ2h0PScxMjAnIGZpbGw9JyMxZjI5MzcnLz48cmVjdCB4PSc2ODYnIHk9JzEzMCcgd2lkdGg9JzQwJyBoZWlnaHQ9JzMwJyByeD0nNScgZmlsbD0nIzBmNzY2ZScvPjwvc3ZnPg==',
+  parkade: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc4MDAnIGhlaWdodD0nNjAwJyB2aWV3Qm94PScwIDAgODAwIDYwMCc+PHJlY3Qgd2lkdGg9JzgwMCcgaGVpZ2h0PSc2MDAnIGZpbGw9JyMxZTI5M2InLz48cmVjdCB4PScwJyB5PScwJyB3aWR0aD0nODAwJyBoZWlnaHQ9JzE1MCcgZmlsbD0nIzBmMTcyYScvPjxyZWN0IHg9JzAnIHk9JzE1MCcgd2lkdGg9JzgwMCcgaGVpZ2h0PScxMicgZmlsbD0nIzMzNDE1NScvPjxyZWN0IHg9JzAnIHk9JzMwMCcgd2lkdGg9JzgwMCcgaGVpZ2h0PScxMicgZmlsbD0nIzMzNDE1NScvPjxyZWN0IHg9JzAnIHk9JzQ1MCcgd2lkdGg9JzgwMCcgaGVpZ2h0PScxMicgZmlsbD0nIzMzNDE1NScvPjxyZWN0IHg9JzAnIHk9JzQ2MCcgd2lkdGg9JzgwMCcgaGVpZ2h0PScxNDAnIGZpbGw9JyM2NDc0OGInLz48bGluZSB4MT0nODAnIHkxPSc0NzAnIHgyPSc4MCcgeTI9JzU5NScgc3Ryb2tlPScjZjFmNWY5JyBzdHJva2Utd2lkdGg9JzYnIG9wYWNpdHk9Jy43Jy8+PGxpbmUgeDE9JzI2MCcgeTE9JzQ3MCcgeDI9JzI2MCcgeTI9JzU5NScgc3Ryb2tlPScjZjFmNWY5JyBzdHJva2Utd2lkdGg9JzYnIG9wYWNpdHk9Jy43Jy8+PGxpbmUgeDE9JzQ0MCcgeTE9JzQ3MCcgeDI9JzQ0MCcgeTI9JzU5NScgc3Ryb2tlPScjZjFmNWY5JyBzdHJva2Utd2lkdGg9JzYnIG9wYWNpdHk9Jy43Jy8+PGxpbmUgeDE9JzYyMCcgeTE9JzQ3MCcgeDI9JzYyMCcgeTI9JzU5NScgc3Ryb2tlPScjZjFmNWY5JyBzdHJva2Utd2lkdGg9JzYnIG9wYWNpdHk9Jy43Jy8+PGcgdHJhbnNmb3JtPSd0cmFuc2xhdGUoMTEwLDQ5MCkgc2NhbGUoMS4zKSc+PHJlY3QgeD0nMCcgeT0nMTgnIHdpZHRoPScxMjAnIGhlaWdodD0nMzQnIHJ4PSc5JyBmaWxsPScjMGVhNWU5Jy8+PHBhdGggZD0nTTE4IDE4IEwzNCAyIEw4NiAyIEwxMDIgMTggWicgZmlsbD0nIzBlYTVlOScgb3BhY2l0eT0nLjg1Jy8+PHJlY3QgeD0nMzYnIHk9JzUnIHdpZHRoPScyMicgaGVpZ2h0PScxMycgcng9JzMnIGZpbGw9JyNjZmU4ZjUnIG9wYWNpdHk9Jy45Jy8+PHJlY3QgeD0nNjInIHk9JzUnIHdpZHRoPScyMicgaGVpZ2h0PScxMycgcng9JzMnIGZpbGw9JyNjZmU4ZjUnIG9wYWNpdHk9Jy45Jy8+PGNpcmNsZSBjeD0nMjgnIGN5PSc1NCcgcj0nMTEnIGZpbGw9JyMxZjI5MzcnLz48Y2lyY2xlIGN4PScyOCcgY3k9JzU0JyByPSc0LjUnIGZpbGw9JyM5Y2EzYWYnLz48Y2lyY2xlIGN4PSc5MicgY3k9JzU0JyByPScxMScgZmlsbD0nIzFmMjkzNycvPjxjaXJjbGUgY3g9JzkyJyBjeT0nNTQnIHI9JzQuNScgZmlsbD0nIzljYTNhZicvPjwvZz48ZyB0cmFuc2Zvcm09J3RyYW5zbGF0ZSgzMDAsNDkwKSBzY2FsZSgxLjMpJz48cmVjdCB4PScwJyB5PScxOCcgd2lkdGg9JzEyMCcgaGVpZ2h0PSczNCcgcng9JzknIGZpbGw9JyNmOGZhZmMnLz48cGF0aCBkPSdNMTggMTggTDM0IDIgTDg2IDIgTDEwMiAxOCBaJyBmaWxsPScjZjhmYWZjJyBvcGFjaXR5PScuODUnLz48cmVjdCB4PSczNicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48cmVjdCB4PSc2MicgeT0nNScgd2lkdGg9JzIyJyBoZWlnaHQ9JzEzJyByeD0nMycgZmlsbD0nI2NmZThmNScgb3BhY2l0eT0nLjknLz48Y2lyY2xlIGN4PScyOCcgY3k9JzU0JyByPScxMScgZmlsbD0nIzFmMjkzNycvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzQuNScgZmlsbD0nIzljYTNhZicvPjxjaXJjbGUgY3g9JzkyJyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PC9nPjxnIHRyYW5zZm9ybT0ndHJhbnNsYXRlKDQ4MCw0OTApIHNjYWxlKDEuMyknPjxyZWN0IHg9JzAnIHk9JzE4JyB3aWR0aD0nMTIwJyBoZWlnaHQ9JzM0JyByeD0nOScgZmlsbD0nI2RjMjYyNicvPjxwYXRoIGQ9J00xOCAxOCBMMzQgMiBMODYgMiBMMTAyIDE4IFonIGZpbGw9JyNkYzI2MjYnIG9wYWNpdHk9Jy44NScvPjxyZWN0IHg9JzM2JyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxyZWN0IHg9JzYyJyB5PSc1JyB3aWR0aD0nMjInIGhlaWdodD0nMTMnIHJ4PSczJyBmaWxsPScjY2ZlOGY1JyBvcGFjaXR5PScuOScvPjxjaXJjbGUgY3g9JzI4JyBjeT0nNTQnIHI9JzExJyBmaWxsPScjMWYyOTM3Jy8+PGNpcmNsZSBjeD0nMjgnIGN5PSc1NCcgcj0nNC41JyBmaWxsPScjOWNhM2FmJy8+PGNpcmNsZSBjeD0nOTInIGN5PSc1NCcgcj0nMTEnIGZpbGw9JyMxZjI5MzcnLz48Y2lyY2xlIGN4PSc5MicgY3k9JzU0JyByPSc0LjUnIGZpbGw9JyM5Y2EzYWYnLz48L2c+PGNpcmNsZSBjeD0nMTAwJyBjeT0nNjAnIHI9JzEzJyBmaWxsPScjZmRlNjhhJyBvcGFjaXR5PScuOScvPjxjaXJjbGUgY3g9JzMwMCcgY3k9JzYwJyByPScxMycgZmlsbD0nI2ZkZTY4YScgb3BhY2l0eT0nLjknLz48Y2lyY2xlIGN4PSc1MDAnIGN5PSc2MCcgcj0nMTMnIGZpbGw9JyNmZGU2OGEnIG9wYWNpdHk9Jy45Jy8+PGNpcmNsZSBjeD0nNzAwJyBjeT0nNjAnIHI9JzEzJyBmaWxsPScjZmRlNjhhJyBvcGFjaXR5PScuOScvPjxyZWN0IHg9JzMyNScgeT0nMTgwJyB3aWR0aD0nMTUwJyBoZWlnaHQ9JzgwJyByeD0nMTAnIGZpbGw9JyMwZjc2NmUnLz48dGV4dCB4PSc0MDAnIHk9JzI0MCcgZm9udC1mYW1pbHk9J0FyaWFsJyBmb250LXNpemU9JzU0JyBmb250LXdlaWdodD0nYm9sZCcgZmlsbD0nI2ZmZicgdGV4dC1hbmNob3I9J21pZGRsZSc+UDI8L3RleHQ+PC9zdmc+',
+};
+
 const ICONS = ['🚗','🅿️','🏠','🚙','🏢','🚘'];
 const GRADIENTS = [
   'linear-gradient(135deg,#0f766e,#14b8a6)',
@@ -735,6 +794,28 @@ const INITIAL_SPOTS = [
   },
 ];
 
+/* Seeded listings ship without photos; give each one a scene matching its
+   type so Browse looks like a real marketplace instead of emoji tiles.
+   Host-uploaded photos always win — this only fills the gaps. */
+
+const TYPE_SCENES = {
+  'Covered Garage':   [SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.parkade],
+  'Open Lot':         [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.gated],
+  'Private Driveway': [SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.garage],
+  'Street Parking':   [SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot],
+  'Gated Lot':        [SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.parkade],
+};
+
+function withSamplePhotos(spot, i){
+  if(spot.photos && spot.photos.length) return spot;
+  const scenes = TYPE_SCENES[spot.type] || [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.garage];
+  // rotate the pair so neighbouring cards of the same type don't look identical
+  const ordered = i % 2 === 0 ? scenes : [...scenes].reverse();
+  return {...spot, photos: ordered};
+}
+
+const SEEDED_SPOTS = INITIAL_SPOTS.map(withSamplePhotos);
+
 const AREAS = ['All Areas', ...Array.from(new Set(INITIAL_SPOTS.map(s=>s.area)))];
 
 /* ---------- HELPERS ---------- */
@@ -897,7 +978,12 @@ function SpotCard({spot, onOpen}){
           {spot.amenities.slice(0,3).map(a=><AmenityPill key={a} k={a} />)}
         </div>
         <div className="card-footer">
-          <div className="price">₱{spot.price}<span> /hour</span></div>
+          <div>
+            <div className="price">₱{spot.price}<span> /hour</span></div>
+            <div style={{fontSize:11,color:'var(--muted)',fontWeight:600,marginTop:2}}>
+              or ₱{rateFor(spot,'day')}/day · ₱{rateFor(spot,'month')}/mo
+            </div>
+          </div>
           <div style={{fontSize:12,color:'var(--muted)',fontWeight:600}}>
             {spot.reviews.length>0 ? `${spot.reviews.length} review${spot.reviews.length>1?'s':''}` : 'Be the first to review'}
           </div>
@@ -937,7 +1023,7 @@ function BrowseView({spots, onOpen}){
     <React.Fragment>
       <div className="hero">
         <h1>Find parking anywhere in Iloilo City</h1>
-        <p>Rent a driveway, garage, or lot from a local host — by the hour. Search by mall, church, campus, or barangay.</p>
+        <p>Rent a driveway, garage, or lot from a local host — by the hour, day, week, or month. Search by mall, church, campus, or barangay.</p>
         <div className="searchbar">
           <span>🔍</span>
           <input placeholder="Try “Jaro”, “SM City”, “Molo”, “IBP”…" value={q} onChange={e=>setQ(e.target.value)} />
@@ -1059,7 +1145,7 @@ function ListSpotView({onPublish}){
     <div className="wrap">
       <div className="panel">
         <h2>List your parking spot</h2>
-        <p className="muted">Got a driveway, garage, or extra lot in Iloilo City? Publish it in a minute and start earning by the hour.</p>
+        <p className="muted">Got a driveway, garage, or extra lot in Iloilo City? Publish it in a minute and start earning — hourly, daily, weekly, or monthly.</p>
         <form onSubmit={submit}>
           <div className="form-row">
             <div className="field">
@@ -1089,6 +1175,13 @@ function ListSpotView({onPublish}){
             <div className="field">
               <label>Price per hour (₱)</label>
               <input required type="number" min="1" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} placeholder="25" />
+              {Number(form.price)>0 && (
+                <div className="rate-strip">
+                  <span>Auto rates: <b>₱{rateFor({price:Number(form.price)},'day')}</b>/day</span>
+                  <span>· <b>₱{rateFor({price:Number(form.price)},'week')}</b>/week</span>
+                  <span>· <b>₱{rateFor({price:Number(form.price)},'month')}</b>/month</span>
+                </div>
+              )}
             </div>
             <div className="field">
               <label>Spot type</label>
@@ -1221,6 +1314,10 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
   const [processing,setProcessing] = useState(false);
   const [ref,setRef] = useState('');
 
+  const [planKey,setPlanKey] = useState('hour');
+  const [units,setUnits] = useState(1);
+  const plan = planByKey(planKey);
+
   const hours = useMemo(()=>{
     const [sh,sm] = start.split(':').map(Number);
     const [eh,em] = end.split(':').map(Number);
@@ -1229,10 +1326,21 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
     return diff/60;
   },[start,end]);
 
-  const subtotal = hours * spot.price;
+  const qty = planKey==='hour' ? hours : units;
+  const unitRate = rateFor(spot, planKey);
+  const subtotal = qty * unitRate;
   const fee = subtotal * 0.1;
   const total = subtotal + fee;
-  const valid = date && hours>0;
+  const valid = date && qty>0;
+
+  /* Longer plans book whole days, so the hour pickers only apply to hourly. */
+  const endsOn = useMemo(()=>{
+    if(planKey==='hour' || !date) return '';
+    const days = {day:1, week:7, month:30}[planKey] * units;
+    const d = new Date(date+'T00:00:00');
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0,10);
+  },[planKey,units,date]);
 
   function goPay(){ if(valid) setStep(2); }
   function confirm(){
@@ -1244,6 +1352,7 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
       setStep(3);
       onConfirm({
         id:uid('b'), spotId:spot.id, date, start, end, total, ref:bookingRef, method:payMethod,
+        plan:planKey, units:qty, endsOn,
       });
     }, 900);
   }
@@ -1257,12 +1366,41 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
             <React.Fragment>
               <h2>Book: {spot.title}</h2>
               <p className="muted">₱{spot.price}/hour · {spot.area}</p>
-              <div className="form-row" style={{marginTop:16}}>
+
+              <div className="plan-tabs">
+                {RATE_PLANS.map(p=>{
+                  const save = savingsPct(spot,p.key);
+                  return (
+                    <button key={p.key} type="button"
+                      className={"plan-tab"+(planKey===p.key?' active':'')}
+                      onClick={()=>{setPlanKey(p.key); setUnits(1);}}>
+                      <span className="plan-name">{p.label}</span>
+                      <span className="plan-rate">₱{rateFor(spot,p.key)}{p.suffix}</span>
+                      {save>0 && <span className="plan-save">Save {save}%</span>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="form-row" style={{marginTop:14}}>
                 <div className="field">
-                  <label>Date</label>
+                  <label>{planKey==='hour' ? 'Date' : 'Start date'}</label>
                   <input type="date" value={date} onChange={e=>setDate(e.target.value)} />
                 </div>
+                {planKey!=='hour' && (
+                  <div className="field">
+                    <label>Number of {plan.unit}s</label>
+                    <input type="number" min="1" max="12" value={units}
+                      onChange={e=>setUnits(Math.max(1, Number(e.target.value)||1))} />
+                  </div>
+                )}
               </div>
+              {planKey!=='hour' && endsOn && (
+                <p className="muted" style={{fontSize:12,marginTop:-4}}>
+                  📅 {units} {plan.unit}{units>1?'s':''} · ends {endsOn}
+                </p>
+              )}
+              {planKey==='hour' && (
               <div className="form-row">
                 <div className="field">
                   <label>Start time</label>
@@ -1273,12 +1411,24 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
                   <input type="time" value={end} onChange={e=>setEnd(e.target.value)} />
                 </div>
               </div>
+              )}
               <div className="price-card" style={{position:'static',marginTop:6}}>
-                <div className="price-row"><span>{hours>0?hours.toFixed(1):'0'} hour(s) × ₱{spot.price}</span><span>₱{subtotal.toFixed(0)}</span></div>
+                <div className="price-row">
+                  <span>{planKey==='hour' ? `${hours>0?hours.toFixed(1):'0'} hour(s) × ₱${unitRate}` : `${units} ${plan.unit}${units>1?'s':''} × ₱${unitRate}`}</span>
+                  <span>₱{subtotal.toFixed(0)}</span>
+                </div>
+                {planKey!=='hour' && savingsPct(spot,planKey)>0 && (
+                  <div className="price-row" style={{color:'#15803d'}}>
+                    <span>{plan.label} discount</span>
+                    <span>−{savingsPct(spot,planKey)}%</span>
+                  </div>
+                )}
                 <div className="price-row"><span>ParkKo service fee (10%)</span><span>₱{fee.toFixed(0)}</span></div>
                 <div className="price-row total"><span>Total</span><span>₱{total.toFixed(0)}</span></div>
               </div>
-              {!valid && <p style={{color:'var(--danger)',fontSize:12,marginTop:8}}>Pick a date and make sure end time is after start time.</p>}
+              {!valid && <p style={{color:'var(--danger)',fontSize:12,marginTop:8}}>
+                {planKey==='hour' ? 'Pick a date and make sure end time is after start time.' : 'Pick a start date to continue.'}
+              </p>}
               <button className="btn-primary" style={{marginTop:16,width:'100%'}} disabled={!valid} onClick={goPay}>Continue to payment</button>
             </React.Fragment>
           )}
@@ -1322,7 +1472,10 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
               <div className="success-box">
                 <p style={{margin:0,fontWeight:700}}>Reference: {ref}</p>
                 <p style={{margin:'6px 0 0'}}>{spot.title}</p>
-                <p style={{margin:'2px 0 0'}} className="muted">{date} · {start}–{end} · ₱{total.toFixed(0)} paid via {payMethod==='gcash'?'GCash':payMethod==='card'?'Card':'Pay on arrival'}</p>
+                <p style={{margin:'2px 0 0'}} className="muted">
+                  {planKey==='hour' ? `${date} · ${start}–${end}` : `${date} → ${endsOn} · ${units} ${plan.unit}${units>1?'s':''}`}
+                  {' · '}₱{total.toFixed(0)} paid via {payMethod==='gcash'?'GCash':payMethod==='card'?'Card':'Pay on arrival'}
+                </p>
               </div>
               <a className="directions-link" href={gmapsDirections(spot.lat,spot.lng)} target="_blank" rel="noopener">🧭 Get Directions in Google Maps</a>
               <button className="btn-primary" style={{marginTop:14,width:'100%'}} onClick={onDone}>Done</button>
@@ -1415,7 +1568,7 @@ function SpotDetailModal({spot, onClose, onBook}){
 
 function App(){
   const [tab,setTab] = useState('browse');
-  const [spots,setSpots] = useState(()=> loadSpots() || INITIAL_SPOTS);
+  const [spots,setSpots] = useState(()=> loadSpots() || SEEDED_SPOTS);
   const [selectedId,setSelectedId] = useState(null);
   const [bookingSpot,setBookingSpot] = useState(null);
   const [reviewSpotId,setReviewSpotId] = useState(null);
