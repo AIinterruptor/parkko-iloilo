@@ -142,6 +142,37 @@
   }
   .rate-strip{display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px;}
   .rate-strip b{color:var(--ink);font-weight:800;}
+  /* --- verification, documents, chat --- */
+  .verified-chip{background:#dcfce7;color:#15803d;font-size:12px;font-weight:800;padding:6px 12px;border-radius:999px;border:1px solid #86efac;}
+  .navcta.small{padding:7px 12px;font-size:12px;}
+  .verify-banner{border-radius:12px;padding:10px 12px;font-size:12.5px;margin-top:10px;line-height:1.45;}
+  .verify-banner.ok{background:#dcfce7;color:#15803d;border:1px solid #86efac;}
+  .verify-banner.warn{background:#fef9c3;color:#854d0e;border:1px solid #fde047;}
+  .link-btn{background:none;border:none;color:var(--brand);font-weight:800;cursor:pointer;padding:0;font-size:inherit;text-decoration:underline;}
+  .doc-list{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
+  .doc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px;}
+  .doc-info{display:flex;align-items:center;gap:8px;flex:1;min-width:150px;}
+  .doc-icon{font-size:20px;}
+  .doc-label{font-size:13px;font-weight:700;}
+  .doc-upload{background:#fff;border:1.5px solid var(--brand);color:var(--brand);font-weight:700;font-size:12px;padding:7px 14px;border-radius:9px;cursor:pointer;}
+  .doc-upload:disabled{opacity:.6;cursor:wait;}
+  .doc-done{display:flex;align-items:center;gap:8px;}
+  .doc-thumb{width:38px;height:38px;object-fit:cover;border-radius:7px;border:1px solid var(--line);}
+  .doc-check{font-size:12px;font-weight:800;color:#15803d;}
+  .doc-replace{background:none;border:none;color:var(--muted);font-size:11px;text-decoration:underline;cursor:pointer;}
+  .chat-modal{max-width:460px;display:flex;flex-direction:column;max-height:82vh;padding:0;overflow:hidden;}
+  .chat-head{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line);}
+  .chat-host-avatar{width:42px;height:42px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;}
+  .chat-body{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:10px;background:var(--bg);min-height:220px;}
+  .chat-empty{text-align:center;color:var(--muted);font-size:13px;padding:30px 10px;line-height:1.5;}
+  .chat-bubble{max-width:78%;padding:9px 13px;border-radius:15px;font-size:13.5px;line-height:1.4;position:relative;}
+  .chat-bubble.me{align-self:flex-end;background:var(--brand);color:#fff;border-bottom-right-radius:4px;}
+  .chat-bubble.host{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px;}
+  .chat-sender{display:block;font-size:10px;font-weight:800;color:var(--muted);margin-bottom:2px;}
+  .chat-verify-note{font-size:11.5px;color:#854d0e;background:#fef9c3;padding:8px 14px;border-top:1px solid #fde047;}
+  .chat-input{display:flex;gap:8px;padding:14px 16px;border-top:1px solid var(--line);}
+  .chat-input input{flex:1;border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;}
+  .chat-input .btn-primary{padding:10px 18px;}
   .photo-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;}
   .photo-thumb{
     position:relative;width:96px;height:96px;border-radius:12px;overflow:hidden;
@@ -1142,6 +1173,91 @@ function loadSpots() {
   }
 }
 
+/* ---------- BOOKER PROFILE & DOCUMENTS ----------
+   A booker verifies once by submitting documents; after that, every booking
+   skips the document step and the host just sees a "Verified" badge. The
+   four documents are all images, so they reuse compressImage(). Plate number
+   is the one text field. Persisted under its own localStorage key. */
+
+const DOC_TYPES = [{
+  key: 'license',
+  label: "Driver's License",
+  icon: '🪪',
+  kind: 'image'
+}, {
+  key: 'orcr',
+  label: 'OR / CR (vehicle reg.)',
+  icon: '📄',
+  kind: 'image'
+}, {
+  key: 'govid',
+  label: 'Government ID',
+  icon: '🆔',
+  kind: 'image'
+}, {
+  key: 'vehicle',
+  label: 'Vehicle photo',
+  icon: '🚗',
+  kind: 'image'
+}];
+function loadProfile() {
+  try {
+    const raw = localStorage.getItem('parkko_profile');
+    return raw ? JSON.parse(raw) : {
+      verified: false,
+      name: '',
+      plate: '',
+      docs: {}
+    };
+  } catch (err) {
+    return {
+      verified: false,
+      name: '',
+      plate: '',
+      docs: {}
+    };
+  }
+}
+function saveProfile(profile) {
+  try {
+    localStorage.setItem('parkko_profile', JSON.stringify(profile));
+    return {
+      ok: true
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: 'Storage full — documents are large; try re-taking with lower resolution.'
+    };
+  }
+}
+
+/* ---------- CHAT ----------
+   One thread per spot, keyed by spot id. The "host" is simulated: after a
+   booker message, a canned reply lands so the thread feels alive in the demo. */
+
+function loadChats() {
+  try {
+    const raw = localStorage.getItem('parkko_chats');
+    return raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    return {};
+  }
+}
+function saveChats(chats) {
+  try {
+    localStorage.setItem('parkko_chats', JSON.stringify(chats));
+    return {
+      ok: true
+    };
+  } catch (err) {
+    return {
+      ok: false
+    };
+  }
+}
+const HOST_REPLIES = ["Hi! Yes, the spot's available — just confirm your booking and message me when you're near.", "Thanks for reaching out! Gate code is sent once your booking is confirmed. 🙂", "Sure, that works. There's space for an SUV, no problem.", "Salamat! I'll keep the slot reserved for you. Let me know your arrival time."];
+
 /* ---------- SMALL UI PIECES ---------- */
 
 function PhotoUploader({
@@ -1214,6 +1330,70 @@ function PhotoUploader({
       fontSize: 12,
       color: '#b91c1c',
       marginTop: 4
+    }
+  }, error));
+}
+
+/* One document = one compressed image. Reuses the same compression path as
+   listing photos so we never store a raw multi-MB camera capture. */
+function DocUploader({
+  docType,
+  value,
+  onChange
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const inputRef = useRef(null);
+  async function handleFile(e) {
+    const file = (e.target.files || [])[0];
+    if (!file) return;
+    setError('');
+    setBusy(true);
+    try {
+      onChange(await compressImage(file));
+    } catch (err) {
+      setError(err.message);
+    }
+    setBusy(false);
+    if (inputRef.current) inputRef.current.value = '';
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "doc-row"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "doc-info"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "doc-icon"
+  }, docType.icon), /*#__PURE__*/React.createElement("span", {
+    className: "doc-label"
+  }, docType.label)), value ? /*#__PURE__*/React.createElement("div", {
+    className: "doc-done"
+  }, /*#__PURE__*/React.createElement("img", {
+    src: value,
+    alt: docType.label,
+    className: "doc-thumb"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "doc-check"
+  }, "\u2713 Uploaded"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "doc-replace",
+    onClick: () => inputRef.current && inputRef.current.click()
+  }, "Replace")) : /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "doc-upload",
+    onClick: () => inputRef.current && inputRef.current.click(),
+    disabled: busy
+  }, busy ? '⏳ Processing…' : '📎 Upload'), /*#__PURE__*/React.createElement("input", {
+    ref: inputRef,
+    type: "file",
+    accept: "image/*",
+    hidden: true,
+    onChange: handleFile
+  }), error && /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 11,
+      color: '#b91c1c',
+      margin: '2px 0 0',
+      flexBasis: '100%'
     }
   }, error));
 }
@@ -1785,9 +1965,11 @@ function ReviewModal({
 
 function BookingModal({
   spot,
+  profile,
   onClose,
   onConfirm,
-  onDone
+  onDone,
+  onRequestVerify
 }) {
   const [step, setStep] = useState(1); // 1 details, 2 payment, 3 success
   const [date, setDate] = useState('');
@@ -1865,7 +2047,15 @@ function BookingModal({
     onClick: onClose
   }, "\u2715"), /*#__PURE__*/React.createElement("div", {
     className: "modal-body"
-  }, step === 1 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("h2", null, "Book: ", spot.title), /*#__PURE__*/React.createElement("p", {
+  }, step === 1 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("h2", null, "Book: ", spot.title), profile && profile.verified ? /*#__PURE__*/React.createElement("div", {
+    className: "verify-banner ok"
+  }, "\u2713 Verified booker \u2014 no documents needed. The host will see your verified badge.") : /*#__PURE__*/React.createElement("div", {
+    className: "verify-banner warn"
+  }, "\uD83D\uDCC4 This host may ask for documents (license, OR/CR, ID, vehicle photo).", ' ', /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "link-btn",
+    onClick: onRequestVerify
+  }, "Verify once"), " to skip this on every booking."), /*#__PURE__*/React.createElement("p", {
     className: "muted"
   }, "\u20B1", spot.price, "/hour \xB7 ", spot.area), /*#__PURE__*/React.createElement("div", {
     className: "plan-tabs"
@@ -2060,7 +2250,8 @@ function BookingModal({
 function SpotDetailModal({
   spot,
   onClose,
-  onBook
+  onBook,
+  onMessage
 }) {
   const rating = fmtRating(spot);
   const photos = spot.photos || [];
@@ -2176,7 +2367,14 @@ function SpotDetailModal({
       marginTop: 10
     },
     onClick: () => onBook(spot)
-  }, "Book this spot"), /*#__PURE__*/React.createElement("a", {
+  }, "Book this spot"), /*#__PURE__*/React.createElement("button", {
+    className: "btn-secondary",
+    style: {
+      width: '100%',
+      marginTop: 8
+    },
+    onClick: () => onMessage(spot)
+  }, "\uD83D\uDCAC Message host"), /*#__PURE__*/React.createElement("a", {
     className: "directions-link",
     href: gmapsDirections(spot.lat, spot.lng),
     target: "_blank",
@@ -2194,6 +2392,184 @@ function SpotDetailModal({
 
 /* ---------- ROOT APP ---------- */
 
+/* Booker uploads documents once to become verified. All four docs + plate
+   number are required to flip verified true. */
+function VerifyModal({
+  profile,
+  onClose,
+  onVerified
+}) {
+  const [name, setName] = useState(profile.name || '');
+  const [plate, setPlate] = useState(profile.plate || '');
+  const [docs, setDocs] = useState(profile.docs || {});
+  const [error, setError] = useState('');
+  const allDocsIn = DOC_TYPES.every(d => docs[d.key]);
+  const complete = allDocsIn && name.trim() && plate.trim();
+  function submit() {
+    if (!complete) {
+      setError('Please complete all fields and upload every document.');
+      return;
+    }
+    const next = {
+      verified: true,
+      name: name.trim(),
+      plate: plate.trim().toUpperCase(),
+      docs,
+      verifiedOn: '2026'
+    };
+    const saved = saveProfile(next);
+    if (!saved.ok) {
+      setError(saved.error);
+      return;
+    }
+    onVerified(next);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "overlay",
+    onClick: e => {
+      if (e.target === e.currentTarget) onClose();
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal",
+    style: {
+      maxWidth: 540
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "modal-close",
+    onClick: onClose
+  }, "\u2715"), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, /*#__PURE__*/React.createElement("h2", null, "Verify your profile"), /*#__PURE__*/React.createElement("p", {
+    className: "muted"
+  }, "Verify once, then skip documents on every future booking. Hosts see a ", /*#__PURE__*/React.createElement("strong", null, "Verified"), " badge and book with confidence."), /*#__PURE__*/React.createElement("div", {
+    className: "form-row",
+    style: {
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Full name"), /*#__PURE__*/React.createElement("input", {
+    value: name,
+    onChange: e => setName(e.target.value),
+    placeholder: "Juan dela Cruz"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Plate number"), /*#__PURE__*/React.createElement("input", {
+    value: plate,
+    onChange: e => setPlate(e.target.value),
+    placeholder: "ABC 1234"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      marginTop: 12
+    }
+  }, "Documents"), /*#__PURE__*/React.createElement("div", {
+    className: "doc-list"
+  }, DOC_TYPES.map(dt => /*#__PURE__*/React.createElement(DocUploader, {
+    key: dt.key,
+    docType: dt,
+    value: docs[dt.key],
+    onChange: src => setDocs(d => ({
+      ...d,
+      [dt.key]: src
+    }))
+  }))), /*#__PURE__*/React.createElement("p", {
+    className: "muted",
+    style: {
+      fontSize: 12,
+      marginTop: 10
+    }
+  }, "\uD83D\uDD12 Demo only \u2014 documents are stored locally in your browser, never uploaded to a server."), error && /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: 'var(--danger)',
+      fontSize: 13,
+      marginTop: 6
+    }
+  }, error), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary",
+    style: {
+      marginTop: 12,
+      width: '100%'
+    },
+    disabled: !complete,
+    onClick: submit
+  }, complete ? 'Verify my profile' : `Complete all items (${DOC_TYPES.filter(d => docs[d.key]).length}/${DOC_TYPES.length} docs)`))));
+}
+
+/* Booker ↔ host thread for one spot. Host replies are simulated. */
+function ChatModal({
+  spot,
+  profile,
+  thread,
+  onClose,
+  onSend,
+  onRequestVerify
+}) {
+  const [text, setText] = useState('');
+  const scrollRef = useRef(null);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [thread]);
+  function send() {
+    const t = text.trim();
+    if (!t) return;
+    onSend(t);
+    setText('');
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "overlay",
+    onClick: e => {
+      if (e.target === e.currentTarget) onClose();
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal chat-modal"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "modal-close",
+    onClick: onClose
+  }, "\u2715"), /*#__PURE__*/React.createElement("div", {
+    className: "chat-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "chat-host-avatar"
+  }, spot.host.initial), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, spot.host.name), /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12
+    }
+  }, "Host \xB7 ", spot.title))), /*#__PURE__*/React.createElement("div", {
+    className: "chat-body",
+    ref: scrollRef
+  }, (!thread || thread.length === 0) && /*#__PURE__*/React.createElement("div", {
+    className: "chat-empty"
+  }, "\uD83D\uDC4B Say hello \u2014 ask about availability, gate access, or vehicle size."), (thread || []).map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "chat-bubble " + (m.from === 'booker' ? 'me' : 'host')
+  }, m.from === 'host' && /*#__PURE__*/React.createElement("span", {
+    className: "chat-sender"
+  }, spot.host.name), m.text))), !profile.verified && /*#__PURE__*/React.createElement("div", {
+    className: "chat-verify-note"
+  }, profile.docs && Object.keys(profile.docs).length > 0 ? 'Finish verifying to skip document requests when you book.' : 'Tip: ', /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "link-btn",
+    onClick: onRequestVerify
+  }, "Verify your profile"), " so hosts book you faster."), /*#__PURE__*/React.createElement("div", {
+    className: "chat-input"
+  }, /*#__PURE__*/React.createElement("input", {
+    value: text,
+    onChange: e => setText(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter') send();
+    },
+    placeholder: "Message the host\u2026"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary",
+    onClick: send,
+    disabled: !text.trim()
+  }, "Send"))));
+}
 function App() {
   const [tab, setTab] = useState('browse');
   const [spots, setSpots] = useState(() => loadSpots() || SEEDED_SPOTS);
@@ -2202,11 +2578,49 @@ function App() {
   const [reviewSpotId, setReviewSpotId] = useState(null);
   const [bookings, setBookings] = useState([]);
   const [toast, setToast] = useState('');
+  const [profile, setProfile] = useState(loadProfile);
+  const [chatSpotId, setChatSpotId] = useState(null);
+  const [showVerify, setShowVerify] = useState(false);
+  const [chats, setChats] = useState(loadChats);
   const selectedSpot = spots.find(s => s.id === selectedId) || null;
   const reviewSpot = spots.find(s => s.id === reviewSpotId) || null;
+  const chatSpot = spots.find(s => s.id === chatSpotId) || null;
   function showToast(msg) {
     setToast(msg);
     setTimeout(() => setToast(''), 2600);
+  }
+  function handleSendMessage(spotId, text) {
+    const now = chats[spotId] || [];
+    const withMine = [...now, {
+      from: 'booker',
+      text
+    }];
+    const next = {
+      ...chats,
+      [spotId]: withMine
+    };
+    setChats(next);
+    saveChats(next);
+    // Simulated host: a canned reply lands shortly after.
+    const reply = HOST_REPLIES[withMine.length % HOST_REPLIES.length];
+    setTimeout(() => {
+      setChats(prev => {
+        const updated = {
+          ...prev,
+          [spotId]: [...(prev[spotId] || []), {
+            from: 'host',
+            text: reply
+          }]
+        };
+        saveChats(updated);
+        return updated;
+      });
+    }, 1100);
+  }
+  function handleVerified(next) {
+    setProfile(next);
+    setShowVerify(false);
+    showToast('✓ Profile verified — you can now skip documents when booking.');
   }
   function handlePublish(newSpot) {
     const next = [newSpot, ...spots];
@@ -2248,7 +2662,13 @@ function App() {
     onClick: () => setTab('bookings')
   }, "My Bookings", bookings.length > 0 ? ` (${bookings.length})` : '')), /*#__PURE__*/React.createElement("div", {
     className: "navright"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, profile.verified ? /*#__PURE__*/React.createElement("span", {
+    className: "verified-chip",
+    title: `Verified · ${profile.name}`
+  }, "\u2713 Verified") : /*#__PURE__*/React.createElement("button", {
+    className: "navcta ghost small",
+    onClick: () => setShowVerify(true)
+  }, "Verify profile"), /*#__PURE__*/React.createElement("button", {
     className: "navcta ghost",
     onClick: () => setTab('host')
   }, "List your spot"))), /*#__PURE__*/React.createElement("main", null, tab === 'browse' && /*#__PURE__*/React.createElement(BrowseView, {
@@ -2270,15 +2690,37 @@ function App() {
     onClose: () => setSelectedId(null),
     onBook: s => {
       setBookingSpot(s);
+    },
+    onMessage: s => {
+      setChatSpotId(s.id);
     }
   }), bookingSpot && /*#__PURE__*/React.createElement(BookingModal, {
     spot: bookingSpot,
+    profile: profile,
     onClose: () => setBookingSpot(null),
     onConfirm: handleConfirmBooking,
     onDone: () => {
       setBookingSpot(null);
       setSelectedId(null);
+    },
+    onRequestVerify: () => {
+      setBookingSpot(null);
+      setShowVerify(true);
     }
+  }), chatSpot && /*#__PURE__*/React.createElement(ChatModal, {
+    spot: chatSpot,
+    profile: profile,
+    thread: chats[chatSpot.id],
+    onClose: () => setChatSpotId(null),
+    onSend: text => handleSendMessage(chatSpot.id, text),
+    onRequestVerify: () => {
+      setChatSpotId(null);
+      setShowVerify(true);
+    }
+  }), showVerify && /*#__PURE__*/React.createElement(VerifyModal, {
+    profile: profile,
+    onClose: () => setShowVerify(false),
+    onVerified: handleVerified
   }), reviewSpot && /*#__PURE__*/React.createElement(ReviewModal, {
     spot: reviewSpot,
     onClose: () => setReviewSpotId(null),

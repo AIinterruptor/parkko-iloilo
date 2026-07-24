@@ -343,6 +343,62 @@ function loadSpots(){
   }
 }
 
+/* ---------- BOOKER PROFILE & DOCUMENTS ----------
+   A booker verifies once by submitting documents; after that, every booking
+   skips the document step and the host just sees a "Verified" badge. The
+   four documents are all images, so they reuse compressImage(). Plate number
+   is the one text field. Persisted under its own localStorage key. */
+
+const DOC_TYPES = [
+  {key:'license', label:"Driver's License",       icon:'🪪', kind:'image'},
+  {key:'orcr',    label:'OR / CR (vehicle reg.)', icon:'📄', kind:'image'},
+  {key:'govid',   label:'Government ID',           icon:'🆔', kind:'image'},
+  {key:'vehicle', label:'Vehicle photo',           icon:'🚗', kind:'image'},
+];
+
+function loadProfile(){
+  try {
+    const raw = localStorage.getItem('parkko_profile');
+    return raw ? JSON.parse(raw) : {verified:false, name:'', plate:'', docs:{}};
+  } catch(err){
+    return {verified:false, name:'', plate:'', docs:{}};
+  }
+}
+
+function saveProfile(profile){
+  try {
+    localStorage.setItem('parkko_profile', JSON.stringify(profile));
+    return {ok:true};
+  } catch(err){
+    return {ok:false, error:'Storage full — documents are large; try re-taking with lower resolution.'};
+  }
+}
+
+/* ---------- CHAT ----------
+   One thread per spot, keyed by spot id. The "host" is simulated: after a
+   booker message, a canned reply lands so the thread feels alive in the demo. */
+
+function loadChats(){
+  try {
+    const raw = localStorage.getItem('parkko_chats');
+    return raw ? JSON.parse(raw) : {};
+  } catch(err){
+    return {};
+  }
+}
+
+function saveChats(chats){
+  try { localStorage.setItem('parkko_chats', JSON.stringify(chats)); return {ok:true}; }
+  catch(err){ return {ok:false}; }
+}
+
+const HOST_REPLIES = [
+  "Hi! Yes, the spot's available — just confirm your booking and message me when you're near.",
+  "Thanks for reaching out! Gate code is sent once your booking is confirmed. 🙂",
+  "Sure, that works. There's space for an SUV, no problem.",
+  "Salamat! I'll keep the slot reserved for you. Let me know your arrival time.",
+];
+
 /* ---------- SMALL UI PIECES ---------- */
 
 function PhotoUploader({photos, onChange}){
@@ -392,6 +448,46 @@ function PhotoUploader({photos, onChange}){
         {photos.length}/{MAX_PHOTOS} photos · first one is the cover. Photos are resized automatically.
       </p>
       {error && <p style={{fontSize:12,color:'#b91c1c',marginTop:4}}>{error}</p>}
+    </div>
+  );
+}
+
+/* One document = one compressed image. Reuses the same compression path as
+   listing photos so we never store a raw multi-MB camera capture. */
+function DocUploader({docType, value, onChange}){
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState('');
+  const inputRef = useRef(null);
+
+  async function handleFile(e){
+    const file = (e.target.files||[])[0];
+    if(!file) return;
+    setError(''); setBusy(true);
+    try { onChange(await compressImage(file)); }
+    catch(err){ setError(err.message); }
+    setBusy(false);
+    if(inputRef.current) inputRef.current.value = '';
+  }
+
+  return (
+    <div className="doc-row">
+      <div className="doc-info">
+        <span className="doc-icon">{docType.icon}</span>
+        <span className="doc-label">{docType.label}</span>
+      </div>
+      {value ? (
+        <div className="doc-done">
+          <img src={value} alt={docType.label} className="doc-thumb" />
+          <span className="doc-check">✓ Uploaded</span>
+          <button type="button" className="doc-replace" onClick={()=>inputRef.current && inputRef.current.click()}>Replace</button>
+        </div>
+      ) : (
+        <button type="button" className="doc-upload" onClick={()=>inputRef.current && inputRef.current.click()} disabled={busy}>
+          {busy ? '⏳ Processing…' : '📎 Upload'}
+        </button>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" hidden onChange={handleFile} />
+      {error && <p style={{fontSize:11,color:'#b91c1c',margin:'2px 0 0',flexBasis:'100%'}}>{error}</p>}
     </div>
   );
 }
@@ -771,7 +867,7 @@ function ReviewModal({spot, onClose, onSubmit}){
 
 /* ---------- BOOKING MODAL ---------- */
 
-function BookingModal({spot, onClose, onConfirm, onDone}){
+function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerify}){
   const [step,setStep] = useState(1); // 1 details, 2 payment, 3 success
   const [date,setDate] = useState('');
   const [start,setStart] = useState('10:00');
@@ -831,6 +927,14 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
           {step===1 && (
             <React.Fragment>
               <h2>Book: {spot.title}</h2>
+              {profile && profile.verified ? (
+                <div className="verify-banner ok">✓ Verified booker — no documents needed. The host will see your verified badge.</div>
+              ) : (
+                <div className="verify-banner warn">
+                  📄 This host may ask for documents (license, OR/CR, ID, vehicle photo).
+                  {' '}<button type="button" className="link-btn" onClick={onRequestVerify}>Verify once</button> to skip this on every booking.
+                </div>
+              )}
               <p className="muted">₱{spot.price}/hour · {spot.area}</p>
 
               <div className="plan-tabs">
@@ -955,7 +1059,7 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
 
 /* ---------- SPOT DETAIL MODAL ---------- */
 
-function SpotDetailModal({spot, onClose, onBook}){
+function SpotDetailModal({spot, onClose, onBook, onMessage}){
   const rating = fmtRating(spot);
   const photos = spot.photos || [];
   const [active,setActive] = useState(0);
@@ -1019,6 +1123,7 @@ function SpotDetailModal({spot, onClose, onBook}){
                 <div className="big">₱{spot.price}<span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}> /hour</span></div>
                 <p className="muted" style={{fontSize:13}}>{spot.type} · {spot.capacity}</p>
                 <button className="btn-primary" style={{width:'100%',marginTop:10}} onClick={()=>onBook(spot)}>Book this spot</button>
+                <button className="btn-secondary" style={{width:'100%',marginTop:8}} onClick={()=>onMessage(spot)}>💬 Message host</button>
                 <a className="directions-link" href={gmapsDirections(spot.lat,spot.lng)} target="_blank" rel="noopener">🧭 Get Directions in Google Maps</a>
                 <a className="directions-link" style={{marginTop:8}} href={gmapsView(spot.lat,spot.lng)} target="_blank" rel="noopener">🗺️ View on Google Maps</a>
               </div>
@@ -1032,6 +1137,123 @@ function SpotDetailModal({spot, onClose, onBook}){
 
 /* ---------- ROOT APP ---------- */
 
+/* Booker uploads documents once to become verified. All four docs + plate
+   number are required to flip verified true. */
+function VerifyModal({profile, onClose, onVerified}){
+  const [name,setName] = useState(profile.name||'');
+  const [plate,setPlate] = useState(profile.plate||'');
+  const [docs,setDocs] = useState(profile.docs||{});
+  const [error,setError] = useState('');
+
+  const allDocsIn = DOC_TYPES.every(d=>docs[d.key]);
+  const complete = allDocsIn && name.trim() && plate.trim();
+
+  function submit(){
+    if(!complete){ setError('Please complete all fields and upload every document.'); return; }
+    const next = {verified:true, name:name.trim(), plate:plate.trim().toUpperCase(), docs, verifiedOn:'2026'};
+    const saved = saveProfile(next);
+    if(!saved.ok){ setError(saved.error); return; }
+    onVerified(next);
+  }
+
+  return (
+    <div className="overlay" onClick={e=>{if(e.target===e.currentTarget) onClose();}}>
+      <div className="modal" style={{maxWidth:540}}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-body">
+          <h2>Verify your profile</h2>
+          <p className="muted">Verify once, then skip documents on every future booking. Hosts see a <strong>Verified</strong> badge and book with confidence.</p>
+
+          <div className="form-row" style={{marginTop:14}}>
+            <div className="field">
+              <label>Full name</label>
+              <input value={name} onChange={e=>setName(e.target.value)} placeholder="Juan dela Cruz" />
+            </div>
+            <div className="field">
+              <label>Plate number</label>
+              <input value={plate} onChange={e=>setPlate(e.target.value)} placeholder="ABC 1234" />
+            </div>
+          </div>
+
+          <div className="section-title" style={{marginTop:12}}>Documents</div>
+          <div className="doc-list">
+            {DOC_TYPES.map(dt=>(
+              <DocUploader key={dt.key} docType={dt} value={docs[dt.key]}
+                onChange={src=>setDocs(d=>({...d,[dt.key]:src}))} />
+            ))}
+          </div>
+
+          <p className="muted" style={{fontSize:12,marginTop:10}}>🔒 Demo only — documents are stored locally in your browser, never uploaded to a server.</p>
+          {error && <p style={{color:'var(--danger)',fontSize:13,marginTop:6}}>{error}</p>}
+          <button className="btn-primary" style={{marginTop:12,width:'100%'}} disabled={!complete} onClick={submit}>
+            {complete ? 'Verify my profile' : `Complete all items (${DOC_TYPES.filter(d=>docs[d.key]).length}/${DOC_TYPES.length} docs)`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Booker ↔ host thread for one spot. Host replies are simulated. */
+function ChatModal({spot, profile, thread, onClose, onSend, onRequestVerify}){
+  const [text,setText] = useState('');
+  const scrollRef = useRef(null);
+
+  useEffect(()=>{
+    if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  },[thread]);
+
+  function send(){
+    const t = text.trim();
+    if(!t) return;
+    onSend(t);
+    setText('');
+  }
+
+  return (
+    <div className="overlay" onClick={e=>{if(e.target===e.currentTarget) onClose();}}>
+      <div className="modal chat-modal">
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="chat-head">
+          <div className="chat-host-avatar">{spot.host.initial}</div>
+          <div>
+            <div style={{fontWeight:800}}>{spot.host.name}</div>
+            <div className="muted" style={{fontSize:12}}>Host · {spot.title}</div>
+          </div>
+        </div>
+
+        <div className="chat-body" ref={scrollRef}>
+          {(!thread || thread.length===0) && (
+            <div className="chat-empty">👋 Say hello — ask about availability, gate access, or vehicle size.</div>
+          )}
+          {(thread||[]).map((m,i)=>(
+            <div key={i} className={"chat-bubble "+(m.from==='booker'?'me':'host')}>
+              {m.from==='host' && <span className="chat-sender">{spot.host.name}</span>}
+              {m.text}
+            </div>
+          ))}
+        </div>
+
+        {!profile.verified && (
+          <div className="chat-verify-note">
+            {profile.docs && Object.keys(profile.docs).length>0
+              ? 'Finish verifying to skip document requests when you book.'
+              : 'Tip: '}
+            <button type="button" className="link-btn" onClick={onRequestVerify}>Verify your profile</button> so hosts book you faster.
+          </div>
+        )}
+
+        <div className="chat-input">
+          <input value={text} onChange={e=>setText(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter') send();}}
+            placeholder="Message the host…" />
+          <button className="btn-primary" onClick={send} disabled={!text.trim()}>Send</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [tab,setTab] = useState('browse');
   const [spots,setSpots] = useState(()=> loadSpots() || SEEDED_SPOTS);
@@ -1040,11 +1262,39 @@ function App(){
   const [reviewSpotId,setReviewSpotId] = useState(null);
   const [bookings,setBookings] = useState([]);
   const [toast,setToast] = useState('');
+  const [profile,setProfile] = useState(loadProfile);
+  const [chatSpotId,setChatSpotId] = useState(null);
+  const [showVerify,setShowVerify] = useState(false);
+  const [chats,setChats] = useState(loadChats);
 
   const selectedSpot = spots.find(s=>s.id===selectedId) || null;
   const reviewSpot = spots.find(s=>s.id===reviewSpotId) || null;
+  const chatSpot = spots.find(s=>s.id===chatSpotId) || null;
 
   function showToast(msg){ setToast(msg); setTimeout(()=>setToast(''),2600); }
+
+  function handleSendMessage(spotId, text){
+    const now = chats[spotId] || [];
+    const withMine = [...now, {from:'booker', text}];
+    const next = {...chats, [spotId]: withMine};
+    setChats(next);
+    saveChats(next);
+    // Simulated host: a canned reply lands shortly after.
+    const reply = HOST_REPLIES[withMine.length % HOST_REPLIES.length];
+    setTimeout(()=>{
+      setChats(prev=>{
+        const updated = {...prev, [spotId]: [...(prev[spotId]||[]), {from:'host', text:reply}]};
+        saveChats(updated);
+        return updated;
+      });
+    }, 1100);
+  }
+
+  function handleVerified(next){
+    setProfile(next);
+    setShowVerify(false);
+    showToast('✓ Profile verified — you can now skip documents when booking.');
+  }
 
   function handlePublish(newSpot){
     const next = [newSpot, ...spots];
@@ -1075,6 +1325,9 @@ function App(){
           <button className={"navtab"+(tab==='bookings'?' active':'')} onClick={()=>setTab('bookings')}>My Bookings{bookings.length>0?` (${bookings.length})`:''}</button>
         </div>
         <div className="navright">
+          {profile.verified
+            ? <span className="verified-chip" title={`Verified · ${profile.name}`}>✓ Verified</span>
+            : <button className="navcta ghost small" onClick={()=>setShowVerify(true)}>Verify profile</button>}
           <button className={"navcta ghost"} onClick={()=>setTab('host')}>List your spot</button>
         </div>
       </div>
@@ -1095,14 +1348,34 @@ function App(){
           spot={selectedSpot}
           onClose={()=>setSelectedId(null)}
           onBook={(s)=>{ setBookingSpot(s); }}
+          onMessage={(s)=>{ setChatSpotId(s.id); }}
         />
       )}
       {bookingSpot && (
         <BookingModal
           spot={bookingSpot}
+          profile={profile}
           onClose={()=>setBookingSpot(null)}
           onConfirm={handleConfirmBooking}
           onDone={()=>{ setBookingSpot(null); setSelectedId(null); }}
+          onRequestVerify={()=>{ setBookingSpot(null); setShowVerify(true); }}
+        />
+      )}
+      {chatSpot && (
+        <ChatModal
+          spot={chatSpot}
+          profile={profile}
+          thread={chats[chatSpot.id]}
+          onClose={()=>setChatSpotId(null)}
+          onSend={(text)=>handleSendMessage(chatSpot.id, text)}
+          onRequestVerify={()=>{ setChatSpotId(null); setShowVerify(true); }}
+        />
+      )}
+      {showVerify && (
+        <VerifyModal
+          profile={profile}
+          onClose={()=>setShowVerify(false)}
+          onVerified={handleVerified}
         />
       )}
       {reviewSpot && (
