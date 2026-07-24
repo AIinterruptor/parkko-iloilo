@@ -20,6 +20,23 @@ const FIREBASE_CONFIG = {
 
 const FIREBASE_READY = !!FIREBASE_CONFIG.apiKey && typeof firebase !== 'undefined';
 
+/* Turn raw Firebase error codes into something a user can act on. */
+function friendlyAuthError(err){
+  const code = (err && err.code) || '';
+  const map = {
+    'auth/email-already-in-use':'That email is already registered — try logging in.',
+    'auth/invalid-email':'That email address looks invalid.',
+    'auth/weak-password':'Password is too weak — use at least 6 characters.',
+    'auth/wrong-password':'Wrong email or password.',
+    'auth/user-not-found':'No account found with that email.',
+    'auth/invalid-credential':'Wrong email or password.',
+    'auth/network-request-failed':'Network problem — check your connection and try again.',
+    'auth/configuration-not-found':'Sign-in isn’t set up yet. (Admin: enable Email/Password in Firebase Authentication.)',
+    'auth/operation-not-allowed':'Email/password sign-in is disabled. (Admin: enable it in Firebase Authentication.)',
+  };
+  return map[code] || (err && err.message) || 'Something went wrong. Please try again.';
+}
+
 /* Auth abstraction. Firebase when configured; a localStorage stand-in
    otherwise so registration/login still demo without a backend. Both expose
    the same surface: current(), onChange(), register(), login(), logout(). */
@@ -59,10 +76,12 @@ const Auth = (function(){
 
     async register({email, password, name, role}){
       if(FIREBASE_READY){
-        const cred = await fbAuth.createUserWithEmailAndPassword(email, password);
-        const profile = {name, role, email, verified:false, createdAt:new Date().toISOString()};
-        await fbDb.collection('users').doc(cred.user.uid).set(profile);
-        return {uid:cred.user.uid, ...profile};
+        try {
+          const cred = await fbAuth.createUserWithEmailAndPassword(email, password);
+          const profile = {name, role, email, verified:false, createdAt:new Date().toISOString()};
+          await fbDb.collection('users').doc(cred.user.uid).set(profile);
+          return {uid:cred.user.uid, ...profile};
+        } catch(err){ throw new Error(friendlyAuthError(err)); }
       }
       const accts = lAccounts();
       if(accts[email]) throw new Error('An account with that email already exists.');
@@ -74,8 +93,8 @@ const Auth = (function(){
 
     async login({email, password}){
       if(FIREBASE_READY){
-        await fbAuth.signInWithEmailAndPassword(email, password);
-        return true;
+        try { await fbAuth.signInWithEmailAndPassword(email, password); return true; }
+        catch(err){ throw new Error(friendlyAuthError(err)); }
       }
       const accts = lAccounts();
       const u = accts[email];
@@ -1525,6 +1544,62 @@ function AuthModal({onClose, onAuthed}){
   );
 }
 
+function AboutView({onBrowse, onList}){
+  return (
+    <div className="about">
+      <section className="about-hero">
+        <span className="about-eyebrow">Iloilo City · parking, solved together</span>
+        <h1>Every empty driveway is a parking spot waiting to happen.</h1>
+        <p className="about-lead">
+          Iloilo is growing fast — malls, offices, festivals, new business districts.
+          The cars came faster than the parking. ParkKo turns the space that already
+          exists into the parking the city needs.
+        </p>
+      </section>
+
+      <section className="about-problem">
+        <h2>The problem every Ilonggo driver knows</h2>
+        <div className="about-cards">
+          <div className="about-card">
+            <span className="about-ico">🔄</span>
+            <h3>Circling for a slot</h3>
+            <p>You arrive in Jaro, Mandurriao, or downtown and spend 20 minutes hunting for a space — burning fuel, time, and patience.</p>
+          </div>
+          <div className="about-card">
+            <span className="about-ico">🚧</span>
+            <h3>Full lots, no warning</h3>
+            <p>The mall lot is packed on a weekend and you only find out after you’ve driven all the way in and queued at the gate.</p>
+          </div>
+          <div className="about-card">
+            <span className="about-ico">🏚️</span>
+            <h3>Empty space going to waste</h3>
+            <p>Meanwhile, thousands of driveways, garages, and lots sit empty all day while their owners are at work.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="about-solution">
+        <h2>How ParkKo helps</h2>
+        <div className="about-steps">
+          <div className="about-step"><span className="about-num">1</span><div><h4>Hosts list their space</h4><p>Anyone with a driveway, garage, or lot lists it in a minute and earns by the hour, day, week, or month.</p></div></div>
+          <div className="about-step"><span className="about-num">2</span><div><h4>Drivers find & book nearby</h4><p>Search by mall, church, campus, or barangay. See photos, prices, and reviews. Book and get directions.</p></div></div>
+          <div className="about-step"><span className="about-num">3</span><div><h4>Free lots, reported live</h4><p>The map also shows mall and public parking — and drivers report how full each one is, Waze-style, so you know before you go.</p></div></div>
+          <div className="about-step"><span className="about-num">4</span><div><h4>Trust built in</h4><p>Verified profiles, host chat, and document checks make renting a stranger’s space feel safe on both sides.</p></div></div>
+        </div>
+      </section>
+
+      <section className="about-cta">
+        <h2>Iloilo already has enough parking. It’s just locked away.</h2>
+        <p className="muted">ParkKo unlocks it — one driveway, one booking at a time.</p>
+        <div className="about-cta-btns">
+          <button className="btn-primary" onClick={onBrowse}>Find parking</button>
+          <button className="btn-secondary" onClick={onList}>List your spot</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SavedView({spots, savedIds, onOpen, onToggleSave, onBrowse}){
   const saved = savedIds.map(id=>spots.find(s=>s.id===id)).filter(Boolean);
   return (
@@ -1640,6 +1715,7 @@ function App(){
           <button className={"navtab"+(tab==='map'?' active':'')} onClick={()=>setTab('map')}>Map</button>
           <button className={"navtab"+(tab==='saved'?' active':'')} onClick={()=>setTab('saved')}>Saved{savedIds.length>0?` (${savedIds.length})`:''}</button>
           <button className={"navtab"+(tab==='bookings'?' active':'')} onClick={()=>setTab('bookings')}>My Bookings{bookings.length>0?` (${bookings.length})`:''}</button>
+          <button className={"navtab"+(tab==='about'?' active':'')} onClick={()=>setTab('about')}>About</button>
         </div>
         <div className="navright">
           {account ? (
@@ -1661,6 +1737,7 @@ function App(){
       <main>
         {tab==='browse' && <BrowseView spots={spots} onOpen={setSelectedId} savedIds={savedIds} onToggleSave={toggleSave} />}
         {tab==='saved' && <SavedView spots={spots} savedIds={savedIds} onOpen={setSelectedId} onToggleSave={toggleSave} onBrowse={()=>setTab('browse')} />}
+        {tab==='about' && <AboutView onBrowse={()=>setTab('browse')} onList={()=>setTab('host')} />}
         {tab==='map' && <MapView spots={spots} onOpen={setSelectedId} />}
         {tab==='host' && <ListSpotView onPublish={handlePublish} />}
         {tab==='bookings' && <MyBookingsView bookings={bookings} spots={spots} onReview={setReviewSpotId} />}

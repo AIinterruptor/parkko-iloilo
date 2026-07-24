@@ -240,6 +240,31 @@
   .empty{text-align:center;padding:60px 20px;color:var(--muted);}
   .empty-saved{text-align:center;padding:70px 20px;color:var(--muted);}
   .empty-saved h3{margin:10px 0 4px;font-size:20px;color:var(--ink);}
+  /* --- about page --- */
+  .about{max-width:960px;margin:0 auto;padding:8px 20px 60px;}
+  .about-hero{padding:40px 0 28px;border-bottom:1px solid var(--line);}
+  .about-eyebrow{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brand);background:var(--brand-light);padding:6px 14px;border-radius:999px;margin-bottom:18px;}
+  .about-hero h1{font-size:38px;line-height:1.12;margin:0 0 16px;max-width:16ch;color:var(--ink);}
+  .about-lead{font-size:18px;line-height:1.6;color:var(--muted);max-width:60ch;margin:0;}
+  .about-problem,.about-solution{padding:40px 0;border-bottom:1px solid var(--line);}
+  .about h2{font-size:26px;margin:0 0 24px;color:var(--ink);}
+  .about-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+  .about-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--shadow-sm);}
+  .about-ico{font-size:30px;display:block;margin-bottom:10px;}
+  .about-card h3{font-size:17px;margin:0 0 6px;color:var(--ink);}
+  .about-card p{font-size:14px;line-height:1.55;color:var(--muted);margin:0;}
+  .about-steps{display:flex;flex-direction:column;gap:20px;}
+  .about-step{display:flex;gap:18px;align-items:flex-start;}
+  .about-num{flex:0 0 auto;width:40px;height:40px;border-radius:50%;background:var(--brand);color:#fff;font-family:var(--display);font-weight:800;font-size:18px;display:flex;align-items:center;justify-content:center;}
+  .about-step h4{font-size:17px;margin:6px 0 4px;color:var(--ink);}
+  .about-step p{font-size:14.5px;line-height:1.55;color:var(--muted);margin:0;max-width:62ch;}
+  .about-cta{text-align:center;padding:48px 20px 10px;}
+  .about-cta h2{max-width:22ch;margin:0 auto 8px;}
+  .about-cta-btns{display:flex;gap:12px;justify-content:center;margin-top:22px;flex-wrap:wrap;}
+  @media (max-width:720px){
+    .about-hero h1{font-size:29px;}
+    .about-cards{grid-template-columns:1fr;}
+  }
 
   /* MAP */
   .map-wrap{border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);height:560px;}
@@ -711,6 +736,23 @@ const FIREBASE_CONFIG = {
 };
 const FIREBASE_READY = !!FIREBASE_CONFIG.apiKey && typeof firebase !== 'undefined';
 
+/* Turn raw Firebase error codes into something a user can act on. */
+function friendlyAuthError(err) {
+  const code = err && err.code || '';
+  const map = {
+    'auth/email-already-in-use': 'That email is already registered — try logging in.',
+    'auth/invalid-email': 'That email address looks invalid.',
+    'auth/weak-password': 'Password is too weak — use at least 6 characters.',
+    'auth/wrong-password': 'Wrong email or password.',
+    'auth/user-not-found': 'No account found with that email.',
+    'auth/invalid-credential': 'Wrong email or password.',
+    'auth/network-request-failed': 'Network problem — check your connection and try again.',
+    'auth/configuration-not-found': 'Sign-in isn’t set up yet. (Admin: enable Email/Password in Firebase Authentication.)',
+    'auth/operation-not-allowed': 'Email/password sign-in is disabled. (Admin: enable it in Firebase Authentication.)'
+  };
+  return map[code] || err && err.message || 'Something went wrong. Please try again.';
+}
+
 /* Auth abstraction. Firebase when configured; a localStorage stand-in
    otherwise so registration/login still demo without a backend. Both expose
    the same surface: current(), onChange(), register(), login(), logout(). */
@@ -783,19 +825,23 @@ const Auth = function () {
       role
     }) {
       if (FIREBASE_READY) {
-        const cred = await fbAuth.createUserWithEmailAndPassword(email, password);
-        const profile = {
-          name,
-          role,
-          email,
-          verified: false,
-          createdAt: new Date().toISOString()
-        };
-        await fbDb.collection('users').doc(cred.user.uid).set(profile);
-        return {
-          uid: cred.user.uid,
-          ...profile
-        };
+        try {
+          const cred = await fbAuth.createUserWithEmailAndPassword(email, password);
+          const profile = {
+            name,
+            role,
+            email,
+            verified: false,
+            createdAt: new Date().toISOString()
+          };
+          await fbDb.collection('users').doc(cred.user.uid).set(profile);
+          return {
+            uid: cred.user.uid,
+            ...profile
+          };
+        } catch (err) {
+          throw new Error(friendlyAuthError(err));
+        }
       }
       const accts = lAccounts();
       if (accts[email]) throw new Error('An account with that email already exists.');
@@ -821,8 +867,12 @@ const Auth = function () {
       password
     }) {
       if (FIREBASE_READY) {
-        await fbAuth.signInWithEmailAndPassword(email, password);
-        return true;
+        try {
+          await fbAuth.signInWithEmailAndPassword(email, password);
+          return true;
+        } catch (err) {
+          throw new Error(friendlyAuthError(err));
+        }
       }
       const accts = lAccounts();
       const u = accts[email];
@@ -3118,6 +3168,68 @@ function AuthModal({
     onClick: submit
   }, busy ? 'Please wait…' : mode === 'signup' ? `Create ${role} account` : 'Log in'))));
 }
+function AboutView({
+  onBrowse,
+  onList
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "about"
+  }, /*#__PURE__*/React.createElement("section", {
+    className: "about-hero"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "about-eyebrow"
+  }, "Iloilo City \xB7 parking, solved together"), /*#__PURE__*/React.createElement("h1", null, "Every empty driveway is a parking spot waiting to happen."), /*#__PURE__*/React.createElement("p", {
+    className: "about-lead"
+  }, "Iloilo is growing fast \u2014 malls, offices, festivals, new business districts. The cars came faster than the parking. ParkKo turns the space that already exists into the parking the city needs.")), /*#__PURE__*/React.createElement("section", {
+    className: "about-problem"
+  }, /*#__PURE__*/React.createElement("h2", null, "The problem every Ilonggo driver knows"), /*#__PURE__*/React.createElement("div", {
+    className: "about-cards"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "about-card"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "about-ico"
+  }, "\uD83D\uDD04"), /*#__PURE__*/React.createElement("h3", null, "Circling for a slot"), /*#__PURE__*/React.createElement("p", null, "You arrive in Jaro, Mandurriao, or downtown and spend 20 minutes hunting for a space \u2014 burning fuel, time, and patience.")), /*#__PURE__*/React.createElement("div", {
+    className: "about-card"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "about-ico"
+  }, "\uD83D\uDEA7"), /*#__PURE__*/React.createElement("h3", null, "Full lots, no warning"), /*#__PURE__*/React.createElement("p", null, "The mall lot is packed on a weekend and you only find out after you\u2019ve driven all the way in and queued at the gate.")), /*#__PURE__*/React.createElement("div", {
+    className: "about-card"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "about-ico"
+  }, "\uD83C\uDFDA\uFE0F"), /*#__PURE__*/React.createElement("h3", null, "Empty space going to waste"), /*#__PURE__*/React.createElement("p", null, "Meanwhile, thousands of driveways, garages, and lots sit empty all day while their owners are at work.")))), /*#__PURE__*/React.createElement("section", {
+    className: "about-solution"
+  }, /*#__PURE__*/React.createElement("h2", null, "How ParkKo helps"), /*#__PURE__*/React.createElement("div", {
+    className: "about-steps"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "about-step"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "about-num"
+  }, "1"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h4", null, "Hosts list their space"), /*#__PURE__*/React.createElement("p", null, "Anyone with a driveway, garage, or lot lists it in a minute and earns by the hour, day, week, or month."))), /*#__PURE__*/React.createElement("div", {
+    className: "about-step"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "about-num"
+  }, "2"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h4", null, "Drivers find & book nearby"), /*#__PURE__*/React.createElement("p", null, "Search by mall, church, campus, or barangay. See photos, prices, and reviews. Book and get directions."))), /*#__PURE__*/React.createElement("div", {
+    className: "about-step"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "about-num"
+  }, "3"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h4", null, "Free lots, reported live"), /*#__PURE__*/React.createElement("p", null, "The map also shows mall and public parking \u2014 and drivers report how full each one is, Waze-style, so you know before you go."))), /*#__PURE__*/React.createElement("div", {
+    className: "about-step"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "about-num"
+  }, "4"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h4", null, "Trust built in"), /*#__PURE__*/React.createElement("p", null, "Verified profiles, host chat, and document checks make renting a stranger\u2019s space feel safe on both sides."))))), /*#__PURE__*/React.createElement("section", {
+    className: "about-cta"
+  }, /*#__PURE__*/React.createElement("h2", null, "Iloilo already has enough parking. It\u2019s just locked away."), /*#__PURE__*/React.createElement("p", {
+    className: "muted"
+  }, "ParkKo unlocks it \u2014 one driveway, one booking at a time."), /*#__PURE__*/React.createElement("div", {
+    className: "about-cta-btns"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary",
+    onClick: onBrowse
+  }, "Find parking"), /*#__PURE__*/React.createElement("button", {
+    className: "btn-secondary",
+    onClick: onList
+  }, "List your spot"))));
+}
 function SavedView({
   spots,
   savedIds,
@@ -3269,7 +3381,10 @@ function App() {
   }, "Saved", savedIds.length > 0 ? ` (${savedIds.length})` : ''), /*#__PURE__*/React.createElement("button", {
     className: "navtab" + (tab === 'bookings' ? ' active' : ''),
     onClick: () => setTab('bookings')
-  }, "My Bookings", bookings.length > 0 ? ` (${bookings.length})` : '')), /*#__PURE__*/React.createElement("div", {
+  }, "My Bookings", bookings.length > 0 ? ` (${bookings.length})` : ''), /*#__PURE__*/React.createElement("button", {
+    className: "navtab" + (tab === 'about' ? ' active' : ''),
+    onClick: () => setTab('about')
+  }, "About")), /*#__PURE__*/React.createElement("div", {
     className: "navright"
   }, account ? /*#__PURE__*/React.createElement("div", {
     className: "account-box"
@@ -3298,6 +3413,9 @@ function App() {
     onOpen: setSelectedId,
     onToggleSave: toggleSave,
     onBrowse: () => setTab('browse')
+  }), tab === 'about' && /*#__PURE__*/React.createElement(AboutView, {
+    onBrowse: () => setTab('browse'),
+    onList: () => setTab('host')
   }), tab === 'map' && /*#__PURE__*/React.createElement(MapView, {
     spots: spots,
     onOpen: setSelectedId
