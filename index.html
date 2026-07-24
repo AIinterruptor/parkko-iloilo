@@ -95,7 +95,41 @@
   .card:hover{transform:translateY(-3px);box-shadow:0 12px 24px rgba(15,23,42,.1);}
   .card-photo{
     height:150px;display:flex;align-items:center;justify-content:center;font-size:46px;position:relative;
+    overflow:hidden;background-size:cover;background-position:center;
   }
+  .card-photo img{width:100%;height:100%;object-fit:cover;display:block;}
+  .photo-count{
+    position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;
+    font-weight:700;padding:3px 9px;border-radius:999px;backdrop-filter:blur(4px);
+  }
+  .photo-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;}
+  .photo-thumb{
+    position:relative;width:96px;height:96px;border-radius:12px;overflow:hidden;
+    border:1px solid var(--line);background:#f1f5f9;
+  }
+  .photo-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .photo-cover{
+    position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;
+    font-weight:800;padding:2px 6px;border-radius:999px;letter-spacing:.03em;
+  }
+  .photo-remove{
+    position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;border:none;cursor:pointer;
+    background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;
+  }
+  .photo-remove:hover{background:#b91c1c;}
+  .photo-add{
+    width:96px;height:96px;border-radius:12px;border:2px dashed var(--line);background:#f8fafc;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    font-size:11px;font-weight:700;color:var(--muted);transition:.15s;
+  }
+  .photo-add:hover:not(:disabled){border-color:var(--brand);color:var(--brand);background:#f0fdfa;}
+  .photo-add:disabled{cursor:wait;opacity:.6;}
+  .gallery{display:flex;gap:8px;overflow-x:auto;padding:10px 0 2px;}
+  .gallery img{
+    width:88px;height:66px;object-fit:cover;border-radius:9px;cursor:pointer;flex:0 0 auto;
+    border:2px solid transparent;transition:.15s;
+  }
+  .gallery img.active{border-color:var(--brand);}
   .badge-new{
     position:absolute;top:10px;left:10px;background:#fff;color:var(--brand-dark);font-size:11px;font-weight:800;
     padding:4px 10px;border-radius:999px;
@@ -726,7 +760,116 @@ function gmapsView(lat,lng){
 }
 function uid(prefix){ return prefix + Math.random().toString(36).slice(2,9); }
 
+/* ---------- PHOTO HANDLING ----------
+   Phone photos are 3-8MB; localStorage caps out around 5MB total.
+   Every upload is downscaled to <=1200px and re-encoded as JPEG so a
+   stored photo lands near 100-150KB instead of megabytes. */
+
+const MAX_PHOTOS = 5;
+const MAX_EDGE = 1200;
+
+function compressImage(file){
+  return new Promise((resolve,reject)=>{
+    if(!file.type.startsWith('image/')){ reject(new Error('Not an image')); return; }
+    const reader = new FileReader();
+    reader.onerror = ()=>reject(new Error('Could not read file'));
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onerror = ()=>reject(new Error('Could not decode image'));
+      img.onload = ()=>{
+        let {width:w, height:h} = img;
+        if(w>MAX_EDGE || h>MAX_EDGE){
+          const scale = MAX_EDGE / Math.max(w,h);
+          w = Math.round(w*scale); h = Math.round(h*scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';           // flatten transparency so PNGs don't go black
+        ctx.fillRect(0,0,w,h);
+        ctx.drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/* Storage is shared with everything else we persist, so a failed write
+   is a real possibility once a few listings carry photos. */
+function saveSpots(spots){
+  try {
+    localStorage.setItem('parkko_spots', JSON.stringify(spots));
+    return {ok:true};
+  } catch(err){
+    return {ok:false, error:'Storage full — try fewer or smaller photos.'};
+  }
+}
+
+function loadSpots(){
+  try {
+    const raw = localStorage.getItem('parkko_spots');
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length ? parsed : null;
+  } catch(err){
+    return null;
+  }
+}
+
 /* ---------- SMALL UI PIECES ---------- */
+
+function PhotoUploader({photos, onChange}){
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState('');
+  const inputRef = useRef(null);
+
+  async function handleFiles(e){
+    const files = Array.from(e.target.files||[]);
+    if(!files.length) return;
+    setError(''); setBusy(true);
+    const room = MAX_PHOTOS - photos.length;
+    if(files.length > room) setError(`Only ${room} more photo${room!==1?'s':''} allowed — extras skipped.`);
+    const accepted = [];
+    for(const file of files.slice(0, Math.max(room,0))){
+      try { accepted.push(await compressImage(file)); }
+      catch(err){ setError(`Skipped "${file.name}" — ${err.message}.`); }
+    }
+    if(accepted.length) onChange([...photos, ...accepted]);
+    setBusy(false);
+    if(inputRef.current) inputRef.current.value = '';  // allow re-picking the same file
+  }
+
+  const full = photos.length >= MAX_PHOTOS;
+
+  return (
+    <div>
+      <div className="photo-grid">
+        {photos.map((src,i)=>(
+          <div key={i} className="photo-thumb">
+            <img src={src} alt={`Listing photo ${i+1}`} />
+            {i===0 && <span className="photo-cover">Cover</span>}
+            <button type="button" className="photo-remove"
+              onClick={()=>onChange(photos.filter((_,j)=>j!==i))}
+              aria-label={`Remove photo ${i+1}`}>✕</button>
+          </div>
+        ))}
+        {!full && (
+          <button type="button" className="photo-add" onClick={()=>inputRef.current && inputRef.current.click()} disabled={busy}>
+            <span style={{fontSize:26,lineHeight:1}}>{busy?'⏳':'📷'}</span>
+            <span>{busy?'Processing…':'Add photos'}</span>
+          </button>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={handleFiles} />
+      <p className="muted" style={{fontSize:12,marginTop:6}}>
+        {photos.length}/{MAX_PHOTOS} photos · first one is the cover. Photos are resized automatically.
+      </p>
+      {error && <p style={{fontSize:12,color:'#b91c1c',marginTop:4}}>{error}</p>}
+    </div>
+  );
+}
 
 function AmenityPill({k}){
   const a = AMENITY_LABELS[k];
@@ -736,12 +879,16 @@ function AmenityPill({k}){
 
 function SpotCard({spot, onOpen}){
   const rating = fmtRating(spot);
+  const hasPhotos = spot.photos && spot.photos.length > 0;
   return (
     <div className="card" onClick={()=>onOpen(spot.id)}>
-      <div className="card-photo" style={{background:GRADIENTS[spot.gradient % GRADIENTS.length]}}>
-        <span style={{filter:'drop-shadow(0 2px 4px rgba(0,0,0,.25))'}}>{ICONS[spot.icon % ICONS.length]}</span>
+      <div className="card-photo" style={hasPhotos ? undefined : {background:GRADIENTS[spot.gradient % GRADIENTS.length]}}>
+        {hasPhotos
+          ? <img src={spot.photos[0]} alt={spot.title} loading="lazy" />
+          : <span style={{filter:'drop-shadow(0 2px 4px rgba(0,0,0,.25))'}}>{ICONS[spot.icon % ICONS.length]}</span>}
         {spot.reviews.length===0 && <span className="badge-new">New listing</span>}
         {rating && <span className="badge-rating">★ {rating}</span>}
+        {hasPhotos && spot.photos.length>1 && <span className="photo-count">📷 {spot.photos.length}</span>}
       </div>
       <div className="card-body">
         <p className="card-title">{spot.title}</p>
@@ -874,7 +1021,7 @@ function MapView({spots, onOpen}){
 function ListSpotView({onPublish}){
   const [form,setForm] = useState({
     title:'', area:AREAS[1]||'Jaro', address:'', price:'', type:'Private Driveway',
-    capacity:'Sedan', description:'', availability:'', amenities:[],
+    capacity:'Sedan', description:'', availability:'', amenities:[], photos:[],
   });
   const [done,setDone] = useState(false);
 
@@ -899,11 +1046,12 @@ function ListSpotView({onPublish}){
       host:{name:'You (New Host)', initial:'Y', since:'2026'},
       availability: form.availability || 'Flexible — message host',
       icon: Math.floor(Math.random()*ICONS.length), gradient: Math.floor(Math.random()*GRADIENTS.length),
+      photos: form.photos,
       reviews:[],
     };
     onPublish(newSpot);
     setDone(true);
-    setForm({title:'',area:AREAS[1]||'Jaro',address:'',price:'',type:'Private Driveway',capacity:'Sedan',description:'',availability:'',amenities:[]});
+    setForm({title:'',area:AREAS[1]||'Jaro',address:'',price:'',type:'Private Driveway',capacity:'Sedan',description:'',availability:'',amenities:[],photos:[]});
     setTimeout(()=>setDone(false),4500);
   }
 
@@ -917,6 +1065,12 @@ function ListSpotView({onPublish}){
             <div className="field">
               <label>Listing title</label>
               <input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Covered driveway near SM City" />
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="field">
+              <label>Photos of your spot</label>
+              <PhotoUploader photos={form.photos} onChange={photos=>setForm(f=>({...f,photos}))} />
             </div>
           </div>
           <div className="form-row">
@@ -1184,14 +1338,31 @@ function BookingModal({spot, onClose, onConfirm, onDone}){
 
 function SpotDetailModal({spot, onClose, onBook}){
   const rating = fmtRating(spot);
+  const photos = spot.photos || [];
+  const [active,setActive] = useState(0);
   return (
     <div className="overlay" onClick={e=>{if(e.target===e.currentTarget) onClose();}}>
       <div className="modal">
         <button className="modal-close" onClick={onClose}>✕</button>
-        <div className="modal-hero" style={{background:GRADIENTS[spot.gradient % GRADIENTS.length]}}>
-          {ICONS[spot.icon % ICONS.length]}
-        </div>
+        {photos.length > 0 ? (
+          <div className="modal-hero" style={{padding:0,overflow:'hidden'}}>
+            <img src={photos[Math.min(active,photos.length-1)]} alt={spot.title}
+              style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'20px 20px 0 0'}} />
+          </div>
+        ) : (
+          <div className="modal-hero" style={{background:GRADIENTS[spot.gradient % GRADIENTS.length]}}>
+            {ICONS[spot.icon % ICONS.length]}
+          </div>
+        )}
         <div className="modal-body">
+          {photos.length > 1 && (
+            <div className="gallery">
+              {photos.map((src,i)=>(
+                <img key={i} src={src} alt={`Photo ${i+1}`} className={i===active?'active':''}
+                  onClick={()=>setActive(i)} />
+              ))}
+            </div>
+          )}
           <h2>{spot.title}</h2>
           <p className="muted">📍 {spot.address}</p>
           <p style={{marginTop:4}}>
@@ -1244,7 +1415,7 @@ function SpotDetailModal({spot, onClose, onBook}){
 
 function App(){
   const [tab,setTab] = useState('browse');
-  const [spots,setSpots] = useState(INITIAL_SPOTS);
+  const [spots,setSpots] = useState(()=> loadSpots() || INITIAL_SPOTS);
   const [selectedId,setSelectedId] = useState(null);
   const [bookingSpot,setBookingSpot] = useState(null);
   const [reviewSpotId,setReviewSpotId] = useState(null);
@@ -1257,15 +1428,21 @@ function App(){
   function showToast(msg){ setToast(msg); setTimeout(()=>setToast(''),2600); }
 
   function handlePublish(newSpot){
-    setSpots(prev=>[newSpot, ...prev]);
-    showToast('Listing published — it now appears in Browse & Map.');
+    const next = [newSpot, ...spots];
+    setSpots(next);
+    const saved = saveSpots(next);
+    showToast(saved.ok
+      ? 'Listing published — it now appears in Browse & Map.'
+      : `Published, but not saved: ${saved.error}`);
     setTab('browse');
   }
   function handleConfirmBooking(booking){
     setBookings(prev=>[booking, ...prev]);
   }
   function handleSubmitReview(spotId, review){
-    setSpots(prev=>prev.map(s=> s.id===spotId ? {...s, reviews:[review, ...s.reviews]} : s));
+    const next = spots.map(s=> s.id===spotId ? {...s, reviews:[review, ...s.reviews]} : s);
+    setSpots(next);
+    saveSpots(next);
     showToast('Thanks for your review!');
   }
 
