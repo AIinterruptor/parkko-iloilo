@@ -1,5 +1,45 @@
 const {useState,useEffect,useRef,useMemo} = React;
 
+/* ---------- PAYMENTS (PayMongo via Cloudflare Worker) ----------
+   The Worker holds the PayMongo secret; the app only ever calls the Worker.
+   Set this to the deployed Worker URL (wrangler deploy prints it). Until it's
+   set, the booking flow uses the demo (no-real-payment) path. */
+const PAYMONGO_WORKER_URL = ''; // e.g. 'https://parkko-paymongo.<subdomain>.workers.dev'
+const PAYMENTS_LIVE = !!PAYMONGO_WORKER_URL;
+
+const PayMongo = {
+  async createSource({ amount, type, description }) {
+    const res = await fetch(`${PAYMONGO_WORKER_URL}/create-source`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount, type, description,
+        redirectSuccess: location.href.split('#')[0] + '#pay-success',
+        redirectFailed: location.href.split('#')[0] + '#pay-failed',
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not start payment.');
+    return data; // { id, checkoutUrl, status }
+  },
+  async pollStatus(id) {
+    const res = await fetch(`${PAYMONGO_WORKER_URL}/source-status?id=${encodeURIComponent(id)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not check payment.');
+    return data.status; // pending | chargeable | consumed | expired
+  },
+  async paySource({ sourceId, amount, description }) {
+    const res = await fetch(`${PAYMONGO_WORKER_URL}/pay-source`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceId, amount, description }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Payment failed.');
+    return data; // { id, status, paid }
+  },
+};
+
 /* ---------- FIREBASE (accounts + database) ----------
    Real host/driver accounts and a shared database. The whole integration
    sits behind the Auth object below, so the UI never calls Firebase directly
@@ -1134,6 +1174,7 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
   const [payMethod,setPayMethod] = useState('gcash');
   const [processing,setProcessing] = useState(false);
   const [ref,setRef] = useState('');
+  const [payError,setPayError] = useState('');
 
   const [planKey,setPlanKey] = useState('hour');
   const [units,setUnits] = useState(1);
@@ -1164,18 +1205,60 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
   },[planKey,units,date]);
 
   function goPay(){ if(valid) setStep(2); }
-  function confirm(){
+  function finishBooking(){
+    const bookingRef = 'PK-'+Math.floor(100000+Math.random()*899999);
+    setRef(bookingRef);
+    setProcessing(false);
+    setStep(3);
+    onConfirm({
+      id:uid('b'), spotId:spot.id, date, start, end, total, ref:bookingRef, method:payMethod,
+      plan:planKey, units:qty, endsOn,
+    });
+  }
+
+  async function confirm(){
+    setPayError('');
     setProcessing(true);
-    setTimeout(()=>{
-      const bookingRef = 'PK-'+Math.floor(100000+Math.random()*899999);
-      setRef(bookingRef);
-      setProcessing(false);
-      setStep(3);
-      onConfirm({
-        id:uid('b'), spotId:spot.id, date, start, end, total, ref:bookingRef, method:payMethod,
-        plan:planKey, units:qty, endsOn,
-      });
-    }, 900);
+
+    // Real PayMongo test-mode flow for GCash, only when the Worker is configured.
+    if (PAYMENTS_LIVE && payMethod==='gcash') {
+      try {
+        const desc = `ParkKo · ${spot.title} · ${plan.label}`;
+        const source = await PayMongo.createSource({ amount: total, type:'gcash', description: desc });
+        // Open PayMongo's hosted test checkout in a new tab.
+        const win = window.open(source.checkoutUrl, '_blank');
+        // Poll until the source becomes chargeable (user authorised) or times out.
+        let tries = 0;
+        const poll = setInterval(async ()=>{
+          tries++;
+          try {
+            const status = await PayMongo.pollStatus(source.id);
+            if (status === 'chargeable') {
+              clearInterval(poll);
+              await PayMongo.paySource({ sourceId: source.id, amount: total, description: desc });
+              if (win && !win.closed) win.close();
+              finishBooking();
+            } else if (status === 'expired' || status === 'consumed') {
+              clearInterval(poll);
+              setProcessing(false);
+              setPayError('Payment was not completed. Please try again.');
+            }
+          } catch(e){ /* keep polling */ }
+          if (tries > 60) { // ~2 minutes
+            clearInterval(poll);
+            setProcessing(false);
+            setPayError('Payment timed out. Please try again.');
+          }
+        }, 2000);
+      } catch(err){
+        setProcessing(false);
+        setPayError(err.message || 'Could not start payment.');
+      }
+      return;
+    }
+
+    // Demo path (cash-on-arrival, card, or Worker not configured yet).
+    setTimeout(finishBooking, 900);
   }
 
   return (
@@ -1283,14 +1366,19 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
                   <div className="field"><label>CVC</label><input placeholder="123" /></div>
                 </div>
               )}
-              {payMethod==='gcash' && (
+              {payMethod==='gcash' && !PAYMENTS_LIVE && (
                 <div className="form-row"><div className="field"><label>GCash mobile number</label><input placeholder="09XX XXX XXXX" /></div></div>
               )}
-              <p className="muted" style={{fontSize:12}}>This is a demo prototype — no real payment is processed.</p>
+              {PAYMENTS_LIVE && payMethod==='gcash' ? (
+                <p className="muted" style={{fontSize:12}}>🔒 Secure GCash checkout via PayMongo (test mode — no real charge). A PayMongo window will open to confirm.</p>
+              ) : (
+                <p className="muted" style={{fontSize:12}}>This is a demo prototype — no real payment is processed.</p>
+              )}
+              {payError && <p style={{color:'var(--danger)',fontSize:13,marginTop:6}}>{payError}</p>}
               <div style={{display:'flex',gap:10}}>
-                <button className="btn-secondary" onClick={()=>setStep(1)}>Back</button>
+                <button className="btn-secondary" onClick={()=>setStep(1)} disabled={processing}>Back</button>
                 <button className="btn-primary" style={{flex:1}} onClick={confirm} disabled={processing}>
-                  {processing? 'Processing…' : `Confirm & Pay ₱${total.toFixed(0)}`}
+                  {processing? (PAYMENTS_LIVE && payMethod==='gcash' ? 'Waiting for GCash…' : 'Processing…') : `Confirm & Pay ₱${total.toFixed(0)}`}
                 </button>
               </div>
             </React.Fragment>
