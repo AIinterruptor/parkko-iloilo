@@ -238,6 +238,20 @@
   .price{font-weight:700;font-size:15px;color:var(--ink);}
   .price span{font-weight:400;font-size:13.5px;color:var(--ink);}
   .empty{text-align:center;padding:60px 20px;color:var(--muted);}
+  /* --- search filters --- */
+  .filter-btn{background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:9px 16px;font-size:14px;font-weight:600;color:var(--ink);}
+  .filter-btn.has{border-color:var(--brand);color:var(--brand);background:var(--brand-light);}
+  .filter-panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin-bottom:20px;box-shadow:var(--shadow-sm);}
+  .filter-group{margin-bottom:18px;}
+  .filter-group:last-child{margin-bottom:0;}
+  .filter-label{display:block;font-size:13px;font-weight:700;color:var(--ink);margin-bottom:10px;}
+  .filter-label b{color:var(--brand);}
+  .filter-chips{display:flex;gap:8px;flex-wrap:wrap;}
+  .fchip{background:#fff;border:1.5px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--muted);transition:.15s;}
+  .fchip:hover{border-color:#99f6e4;}
+  .fchip.active{background:var(--brand);border-color:var(--brand);color:#fff;}
+  .filter-range{width:100%;max-width:340px;accent-color:var(--brand);}
+  .filter-clear{background:none;border:none;color:var(--danger);font-weight:700;font-size:13px;text-decoration:underline;margin-top:6px;padding:0;}
   .empty-saved{text-align:center;padding:70px 20px;color:var(--muted);}
   .empty-saved h3{margin:10px 0 4px;font-size:20px;color:var(--ink);}
   /* --- about page --- */
@@ -356,6 +370,36 @@
   }
   .modal-hero{
     height:220px;border-radius:20px 20px 0 0;display:flex;align-items:center;justify-content:center;font-size:70px;
+  }
+  /* Airbnb-style photo mosaic: one large tile + a grid of smaller ones */
+  .photo-mosaic{
+    display:grid;gap:6px;height:300px;border-radius:20px 20px 0 0;overflow:hidden;
+    grid-template-columns:2fr 1fr 1fr;grid-template-rows:1fr 1fr;
+  }
+  .photo-mosaic.count-1{grid-template-columns:1fr;grid-template-rows:1fr;}
+  .photo-mosaic.count-2{grid-template-columns:1fr 1fr;grid-template-rows:1fr;}
+  .photo-mosaic.count-3{grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr;}
+  .mosaic-cell{position:relative;overflow:hidden;cursor:pointer;background:#eee;}
+  .mosaic-cell img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s ease;}
+  .mosaic-cell:hover img{transform:scale(1.05);}
+  /* big first tile spans full height in the default (4-5 photo) layout */
+  .photo-mosaic.count-4 .cell-0,.photo-mosaic.count-5 .cell-0{grid-row:1 / span 2;}
+  .photo-mosaic.count-3 .cell-0{grid-row:1 / span 2;}
+  .mosaic-more{
+    position:absolute;inset:0;background:rgba(0,0,0,.5);color:#fff;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:15px;
+  }
+  .lightbox{
+    position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:100;display:flex;align-items:center;justify-content:center;padding:30px;
+  }
+  .lightbox img{max-width:100%;max-height:100%;border-radius:12px;object-fit:contain;}
+  .lightbox-close{
+    position:absolute;top:20px;right:24px;background:rgba(255,255,255,.15);border:none;color:#fff;
+    width:44px;height:44px;border-radius:50%;font-size:20px;cursor:pointer;
+  }
+  @media (max-width:640px){
+    .photo-mosaic{height:200px;grid-template-columns:1fr 1fr;}
+    .photo-mosaic .cell-3,.photo-mosaic .cell-4{display:none;}
   }
   .modal-body{padding:26px;}
   .modal-body h2{margin:0 0 4px;font-size:22px;}
@@ -1441,17 +1485,18 @@ const INITIAL_SPOTS = [{
    Host-uploaded photos always win — this only fills the gaps. */
 
 const TYPE_SCENES = {
-  'Covered Garage': [SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.parkade],
-  'Open Lot': [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.gated],
-  'Private Driveway': [SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.garage],
-  'Street Parking': [SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot],
-  'Gated Lot': [SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.parkade]
+  'Covered Garage': [SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.openlot],
+  'Open Lot': [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.parkade],
+  'Private Driveway': [SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot],
+  'Street Parking': [SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.gated],
+  'Gated Lot': [SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.openlot]
 };
 function withSamplePhotos(spot, i) {
   if (spot.photos && spot.photos.length) return spot;
-  const scenes = TYPE_SCENES[spot.type] || [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.garage];
-  // rotate the pair so neighbouring cards of the same type don't look identical
-  const ordered = i % 2 === 0 ? scenes : [...scenes].reverse();
+  const scenes = TYPE_SCENES[spot.type] || [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.gated];
+  // rotate so neighbouring cards of the same type don't lead with the same photo
+  const shift = i % scenes.length;
+  const ordered = [...scenes.slice(shift), ...scenes.slice(0, shift)];
   return {
     ...spot,
     photos: ordered
@@ -1868,6 +1913,15 @@ function BrowseView({
   const [area, setArea] = useState('All Areas');
   const [sort, setSort] = useState('rating');
   const [heroIdx, setHeroIdx] = useState(0);
+  const [typeFilter, setTypeFilter] = useState('All');
+  const [maxPrice, setMaxPrice] = useState(100);
+  const [activeAmenities, setActiveAmenities] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const SPOT_TYPES = ['All', 'Covered Garage', 'Open Lot', 'Private Driveway', 'Street Parking', 'Gated Lot'];
+  function toggleAmenityFilter(k) {
+    setActiveAmenities(prev => prev.includes(k) ? prev.filter(a => a !== k) : [...prev, k]);
+  }
+  const activeFilterCount = (typeFilter !== 'All' ? 1 : 0) + (maxPrice < 100 ? 1 : 0) + activeAmenities.length;
 
   /* Slow crossfade between Iloilo landmarks; long enough to read as
      atmosphere rather than a carousel demanding attention. */
@@ -1880,7 +1934,10 @@ function BrowseView({
       const matchesArea = area === 'All Areas' || s.area === area;
       const text = (s.title + ' ' + s.area + ' ' + s.address + ' ' + s.type).toLowerCase();
       const matchesQ = q.trim() === '' || text.includes(q.trim().toLowerCase());
-      return matchesArea && matchesQ;
+      const matchesType = typeFilter === 'All' || s.type === typeFilter;
+      const matchesPrice = s.price <= maxPrice;
+      const matchesAmenities = activeAmenities.length === 0 || activeAmenities.every(a => s.amenities.includes(a));
+      return matchesArea && matchesQ && matchesType && matchesPrice && matchesAmenities;
     });
     if (sort === 'rating') {
       list = list.slice().sort((a, b) => (avgRating(b) || 0) - (avgRating(a) || 0));
@@ -1892,7 +1949,7 @@ function BrowseView({
       list = list.slice().reverse();
     }
     return list;
-  }, [spots, q, area, sort]);
+  }, [spots, q, area, sort, typeFilter, maxPrice, activeAmenities]);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "hero"
   }, HERO_PHOTOS.map((p, i) => /*#__PURE__*/React.createElement("div", {
@@ -1929,7 +1986,16 @@ function BrowseView({
     className: "wrap"
   }, /*#__PURE__*/React.createElement("div", {
     className: "toolbar"
-  }, /*#__PURE__*/React.createElement("h2", null, filtered.length, " spot", filtered.length !== 1 ? 's' : '', " available"), /*#__PURE__*/React.createElement("select", {
+  }, /*#__PURE__*/React.createElement("h2", null, filtered.length, " spot", filtered.length !== 1 ? 's' : '', " available"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "filter-btn" + (activeFilterCount > 0 ? ' has' : ''),
+    onClick: () => setShowFilters(v => !v)
+  }, "\u2699 Filters", activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''), /*#__PURE__*/React.createElement("select", {
     value: sort,
     onChange: e => setSort(e.target.value)
   }, /*#__PURE__*/React.createElement("option", {
@@ -1940,7 +2006,48 @@ function BrowseView({
     value: "price-desc"
   }, "Sort: Price (high to low)"), /*#__PURE__*/React.createElement("option", {
     value: "newest"
-  }, "Sort: Newest"))), filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, "Sort: Newest")))), showFilters && /*#__PURE__*/React.createElement("div", {
+    className: "filter-panel"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "filter-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "filter-label"
+  }, "Type"), /*#__PURE__*/React.createElement("div", {
+    className: "filter-chips"
+  }, SPOT_TYPES.map(t => /*#__PURE__*/React.createElement("button", {
+    key: t,
+    className: "fchip" + (typeFilter === t ? ' active' : ''),
+    onClick: () => setTypeFilter(t)
+  }, t)))), /*#__PURE__*/React.createElement("div", {
+    className: "filter-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "filter-label"
+  }, "Max price: ", /*#__PURE__*/React.createElement("b", null, "\u20B1", maxPrice, maxPrice >= 100 ? '+' : '', "/hr")), /*#__PURE__*/React.createElement("input", {
+    type: "range",
+    min: "10",
+    max: "100",
+    step: "5",
+    value: maxPrice,
+    onChange: e => setMaxPrice(Number(e.target.value)),
+    className: "filter-range"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "filter-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "filter-label"
+  }, "Amenities"), /*#__PURE__*/React.createElement("div", {
+    className: "filter-chips"
+  }, Object.keys(AMENITY_LABELS).map(k => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    className: "fchip" + (activeAmenities.includes(k) ? ' active' : ''),
+    onClick: () => toggleAmenityFilter(k)
+  }, AMENITY_LABELS[k].icon, " ", AMENITY_LABELS[k].label)))), activeFilterCount > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "filter-clear",
+    onClick: () => {
+      setTypeFilter('All');
+      setMaxPrice(100);
+      setActiveAmenities([]);
+    }
+  }, "Clear all filters")), filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "empty"
   }, "No spots match your search. Try another area or keyword.") : /*#__PURE__*/React.createElement("div", {
     className: "grid"
@@ -2713,36 +2820,34 @@ function SpotDetailModal({
     className: "modal-close",
     onClick: onClose
   }, "\u2715"), photos.length > 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "modal-hero",
-    style: {
-      padding: 0,
-      overflow: 'hidden'
-    }
+    className: "photo-mosaic count-" + Math.min(photos.length, 5)
+  }, photos.slice(0, 5).map((src, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "mosaic-cell cell-" + i,
+    onClick: () => setActive(i)
   }, /*#__PURE__*/React.createElement("img", {
-    src: photos[Math.min(active, photos.length - 1)],
-    alt: spot.title,
-    style: {
-      width: '100%',
-      height: '100%',
-      objectFit: 'cover',
-      borderRadius: '20px 20px 0 0'
-    }
-  })) : /*#__PURE__*/React.createElement("div", {
+    src: src,
+    alt: `${spot.title} photo ${i + 1}`
+  }), i === 4 && photos.length > 5 && /*#__PURE__*/React.createElement("span", {
+    className: "mosaic-more"
+  }, "+", photos.length - 5, " photos")))) : /*#__PURE__*/React.createElement("div", {
     className: "modal-hero",
     style: {
       background: GRADIENTS[spot.gradient % GRADIENTS.length]
     }
-  }, ICONS[spot.icon % ICONS.length]), /*#__PURE__*/React.createElement("div", {
+  }, ICONS[spot.icon % ICONS.length]), active > 0 && photos.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "lightbox",
+    onClick: () => setActive(0)
+  }, /*#__PURE__*/React.createElement("img", {
+    src: photos[active],
+    alt: `${spot.title} large`,
+    onClick: e => e.stopPropagation()
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "lightbox-close",
+    onClick: () => setActive(0)
+  }, "\u2715")), /*#__PURE__*/React.createElement("div", {
     className: "modal-body"
-  }, photos.length > 1 && /*#__PURE__*/React.createElement("div", {
-    className: "gallery"
-  }, photos.map((src, i) => /*#__PURE__*/React.createElement("img", {
-    key: i,
-    src: src,
-    alt: `Photo ${i + 1}`,
-    className: i === active ? 'active' : '',
-    onClick: () => setActive(i)
-  }))), /*#__PURE__*/React.createElement("h2", null, spot.title), /*#__PURE__*/React.createElement("p", {
+  }, /*#__PURE__*/React.createElement("h2", null, spot.title), /*#__PURE__*/React.createElement("p", {
     className: "muted"
   }, "\uD83D\uDCCD ", spot.address), /*#__PURE__*/React.createElement("p", {
     style: {

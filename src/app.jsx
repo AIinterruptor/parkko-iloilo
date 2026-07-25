@@ -396,18 +396,19 @@ const INITIAL_SPOTS = [
    Host-uploaded photos always win — this only fills the gaps. */
 
 const TYPE_SCENES = {
-  'Covered Garage':   [SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.parkade],
-  'Open Lot':         [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.gated],
-  'Private Driveway': [SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.garage],
-  'Street Parking':   [SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot],
-  'Gated Lot':        [SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.parkade],
+  'Covered Garage':   [SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.openlot],
+  'Open Lot':         [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.parkade],
+  'Private Driveway': [SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot],
+  'Street Parking':   [SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.gated],
+  'Gated Lot':        [SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.openlot],
 };
 
 function withSamplePhotos(spot, i){
   if(spot.photos && spot.photos.length) return spot;
-  const scenes = TYPE_SCENES[spot.type] || [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.garage];
-  // rotate the pair so neighbouring cards of the same type don't look identical
-  const ordered = i % 2 === 0 ? scenes : [...scenes].reverse();
+  const scenes = TYPE_SCENES[spot.type] || [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.gated];
+  // rotate so neighbouring cards of the same type don't lead with the same photo
+  const shift = i % scenes.length;
+  const ordered = [...scenes.slice(shift), ...scenes.slice(0, shift)];
   return {...spot, photos: ordered};
 }
 
@@ -700,6 +701,16 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
   const [area,setArea] = useState('All Areas');
   const [sort,setSort] = useState('rating');
   const [heroIdx,setHeroIdx] = useState(0);
+  const [typeFilter,setTypeFilter] = useState('All');
+  const [maxPrice,setMaxPrice] = useState(100);
+  const [activeAmenities,setActiveAmenities] = useState([]);
+  const [showFilters,setShowFilters] = useState(false);
+
+  const SPOT_TYPES = ['All','Covered Garage','Open Lot','Private Driveway','Street Parking','Gated Lot'];
+  function toggleAmenityFilter(k){
+    setActiveAmenities(prev=> prev.includes(k) ? prev.filter(a=>a!==k) : [...prev,k]);
+  }
+  const activeFilterCount = (typeFilter!=='All'?1:0) + (maxPrice<100?1:0) + activeAmenities.length;
 
   /* Slow crossfade between Iloilo landmarks; long enough to read as
      atmosphere rather than a carousel demanding attention. */
@@ -713,7 +724,10 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
       const matchesArea = area==='All Areas' || s.area===area;
       const text = (s.title+' '+s.area+' '+s.address+' '+s.type).toLowerCase();
       const matchesQ = q.trim()==='' || text.includes(q.trim().toLowerCase());
-      return matchesArea && matchesQ;
+      const matchesType = typeFilter==='All' || s.type===typeFilter;
+      const matchesPrice = s.price <= maxPrice;
+      const matchesAmenities = activeAmenities.length===0 || activeAmenities.every(a=>s.amenities.includes(a));
+      return matchesArea && matchesQ && matchesType && matchesPrice && matchesAmenities;
     });
     if(sort==='rating'){
       list = list.slice().sort((a,b)=>(avgRating(b)||0)-(avgRating(a)||0));
@@ -725,7 +739,7 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
       list = list.slice().reverse();
     }
     return list;
-  },[spots,q,area,sort]);
+  },[spots,q,area,sort,typeFilter,maxPrice,activeAmenities]);
 
   return (
     <React.Fragment>
@@ -760,13 +774,50 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
       <div className="wrap">
         <div className="toolbar">
           <h2>{filtered.length} spot{filtered.length!==1?'s':''} available</h2>
-          <select value={sort} onChange={e=>setSort(e.target.value)}>
-            <option value="rating">Sort: Top rated</option>
-            <option value="price-asc">Sort: Price (low to high)</option>
-            <option value="price-desc">Sort: Price (high to low)</option>
-            <option value="newest">Sort: Newest</option>
-          </select>
+          <div style={{display:'flex',gap:10,alignItems:'center'}}>
+            <button className={"filter-btn"+(activeFilterCount>0?' has':'')} onClick={()=>setShowFilters(v=>!v)}>
+              ⚙ Filters{activeFilterCount>0?` · ${activeFilterCount}`:''}
+            </button>
+            <select value={sort} onChange={e=>setSort(e.target.value)}>
+              <option value="rating">Sort: Top rated</option>
+              <option value="price-asc">Sort: Price (low to high)</option>
+              <option value="price-desc">Sort: Price (high to low)</option>
+              <option value="newest">Sort: Newest</option>
+            </select>
+          </div>
         </div>
+
+        {showFilters && (
+          <div className="filter-panel">
+            <div className="filter-group">
+              <label className="filter-label">Type</label>
+              <div className="filter-chips">
+                {SPOT_TYPES.map(t=>(
+                  <button key={t} className={"fchip"+(typeFilter===t?' active':'')} onClick={()=>setTypeFilter(t)}>{t}</button>
+                ))}
+              </div>
+            </div>
+            <div className="filter-group">
+              <label className="filter-label">Max price: <b>₱{maxPrice}{maxPrice>=100?'+':''}/hr</b></label>
+              <input type="range" min="10" max="100" step="5" value={maxPrice}
+                onChange={e=>setMaxPrice(Number(e.target.value))} className="filter-range" />
+            </div>
+            <div className="filter-group">
+              <label className="filter-label">Amenities</label>
+              <div className="filter-chips">
+                {Object.keys(AMENITY_LABELS).map(k=>(
+                  <button key={k} className={"fchip"+(activeAmenities.includes(k)?' active':'')} onClick={()=>toggleAmenityFilter(k)}>
+                    {AMENITY_LABELS[k].icon} {AMENITY_LABELS[k].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {activeFilterCount>0 && (
+              <button className="filter-clear" onClick={()=>{setTypeFilter('All');setMaxPrice(100);setActiveAmenities([]);}}>Clear all filters</button>
+            )}
+          </div>
+        )}
+
         {filtered.length===0 ? (
           <div className="empty">No spots match your search. Try another area or keyword.</div>
         ) : (
@@ -1276,24 +1327,26 @@ function SpotDetailModal({spot, onClose, onBook, onMessage}){
       <div className="modal">
         <button className="modal-close" onClick={onClose}>✕</button>
         {photos.length > 0 ? (
-          <div className="modal-hero" style={{padding:0,overflow:'hidden'}}>
-            <img src={photos[Math.min(active,photos.length-1)]} alt={spot.title}
-              style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'20px 20px 0 0'}} />
+          <div className={"photo-mosaic count-"+Math.min(photos.length,5)}>
+            {photos.slice(0,5).map((src,i)=>(
+              <div key={i} className={"mosaic-cell cell-"+i} onClick={()=>setActive(i)}>
+                <img src={src} alt={`${spot.title} photo ${i+1}`} />
+                {i===4 && photos.length>5 && <span className="mosaic-more">+{photos.length-5} photos</span>}
+              </div>
+            ))}
           </div>
         ) : (
           <div className="modal-hero" style={{background:GRADIENTS[spot.gradient % GRADIENTS.length]}}>
             {ICONS[spot.icon % ICONS.length]}
           </div>
         )}
+        {active>0 && photos.length>0 && (
+          <div className="lightbox" onClick={()=>setActive(0)}>
+            <img src={photos[active]} alt={`${spot.title} large`} onClick={e=>e.stopPropagation()} />
+            <button className="lightbox-close" onClick={()=>setActive(0)}>✕</button>
+          </div>
+        )}
         <div className="modal-body">
-          {photos.length > 1 && (
-            <div className="gallery">
-              {photos.map((src,i)=>(
-                <img key={i} src={src} alt={`Photo ${i+1}`} className={i===active?'active':''}
-                  onClick={()=>setActive(i)} />
-              ))}
-            </div>
-          )}
           <h2>{spot.title}</h2>
           <p className="muted">📍 {spot.address}</p>
           <p style={{marginTop:4}}>
