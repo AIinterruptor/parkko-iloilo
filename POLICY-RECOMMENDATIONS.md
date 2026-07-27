@@ -22,6 +22,13 @@ design choice has a consequence you should embrace rather than fight:
 **ParkKo is a listing and coordination platform, not an escrow agent, not an
 insurer, and not an arbitrator.**
 
+*Update: this is now literally true in the code — the PayMongo gateway has been
+removed and rent moves directly between booker and owner. That strengthens the
+position below, but it has one consequence worth stating plainly: **ParkKo
+cannot issue refunds**, because it never receives the money. Every refund in the
+cancellation table below must be actioned by the owner. The platform's leverage
+is reputational (listing badges, removal from the plan), not financial.*
+
 Every policy below follows from that. The moment ParkKo starts holding money,
 judging fault, or promising to cover damage, it takes on custodial and liability
 exposure that a ₱500/month product cannot fund. The platform's job is to make
@@ -278,11 +285,14 @@ Build these whatever the documents say — they're right in every scenario:
 **a. House Rules acknowledgement.** Both owner and booker tick an explicit
 acknowledgement at listing and at booking. Store the version they accepted.
 
-**b. In-app House Rules panel.** Surface the relevant rules where they matter:
+**b. In-app House Rules panel.** *(not yet built — needs the real rules.)*
+Surface the relevant rules where they matter:
 in the listing form for owners, on the receipt for bookers (gate hours, guest
 registration, speed limits, no car washing/repairs, no overnight if applicable).
 
-**c. Owner attestation.** At residency verification, the owner ticks:
+**c. Owner attestation.** ✅ **BUILT** — implemented in `ResidencyModal`, with a
+`HOUSE_RULES_VERSION` stamp so a stored agreement records which wording was
+accepted. At residency verification, the owner ticks:
 > "I confirm my parking slot is mine to lease and that leasing it does not
 > violate the Master Deed, Deed of Restrictions, or House Rules of SMDC Style
 > Residences."
@@ -322,8 +332,8 @@ problem, since you need owners and bookers in the same building simultaneously.
 A revenue share on the ₱500 is a reasonable thing to offer.
 
 ### Build list (once the documents are read)
-- [ ] House Rules acknowledgement + versioning
-- [ ] Owner attestation at residency verification
+- [x] Owner attestation at residency verification, with version stamp
+- [ ] Booker-side House Rules acknowledgement at booking
 - [ ] In-app House Rules panel (needs the real rules)
 - [ ] Admin suspension channel
 - [ ] Guest registration details on the receipt

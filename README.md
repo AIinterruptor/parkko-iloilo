@@ -32,8 +32,9 @@ gating is the UX; the rules are the teeth.
 
 - **Owners pay ₱500/month** to keep listings live. Unlimited slots.
 - **ParkKo takes no commission.** Bookers pay exactly the slot rate.
-- **Payments go directly to the owner's wallet** (GCash / Maya / bank). ParkKo
-  holds no funds and is not a party to the transaction. Listings carry only the
+- **Payments go directly to the owner's wallet** (GCash / Maya / bank), sent
+  from the booker's own banking app. There is no payment gateway: ParkKo holds
+  no funds and is not a party to the transaction. Listings carry only the
   provider, account name, and last four digits — never the full number.
 - Every booking issues a printable receipt naming that wallet.
 
@@ -77,7 +78,14 @@ node build.js
 `build.js` compiles the JSX ahead of time and inlines it. **Never hand-edit the
 compiled block in `index.html`** — the next build overwrites it.
 
-Payments run through a Cloudflare Worker (`worker/`) in PayMongo test mode.
+**No payment gateway.** Rent moves directly between booker and owner in their
+own banking apps; the app records the reference and issues the receipt. The
+former PayMongo Cloudflare Worker has been removed — routing rent through the
+platform would make ParkKo a custodian of other people's funds, with BSP
+obligations and a float it has no reason to hold.
+
+> Note: `worker/` may still exist locally with build artifacts. It is no longer
+> tracked in git and can be deleted.
 
 ## Photo credits
 
