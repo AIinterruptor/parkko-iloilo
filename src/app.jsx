@@ -4,7 +4,7 @@ const {useState,useEffect,useRef,useMemo} = React;
    The Worker holds the PayMongo secret; the app only ever calls the Worker.
    Set this to the deployed Worker URL (wrangler deploy prints it). Until it's
    set, the booking flow uses the demo (no-real-payment) path. */
-const PAYMONGO_WORKER_URL = ''; // e.g. 'https://parkko-paymongo.<subdomain>.workers.dev'
+const PAYMONGO_WORKER_URL = 'https://parkko-paymongo.josed-jdm.workers.dev';
 const PAYMENTS_LIVE = !!PAYMONGO_WORKER_URL;
 
 const PayMongo = {
@@ -91,7 +91,7 @@ const Auth = (function(){
   }
 
   // ----- localStorage fallback -----
-  const LKEY = 'parkko_accounts', SKEY = 'parkko_session';
+  const LKEY = 'parkko_smdc_v2_accounts', SKEY = 'parkko_smdc_v2_session';
   function lAccounts(){ try { return JSON.parse(localStorage.getItem(LKEY)||'{}'); } catch(e){ return {}; } }
   function lSaveAccounts(a){ try { localStorage.setItem(LKEY, JSON.stringify(a)); } catch(e){} }
   function lSession(){ try { return JSON.parse(localStorage.getItem(SKEY)||'null'); } catch(e){ return null; } }
@@ -161,29 +161,39 @@ const AMENITY_LABELS = {
 };
 
 /* ---------- RENTAL PERIODS ----------
-   Hosts price by the hour; longer stays derive from that with a discount,
-   the way real lots price monthly cheaper than 720 separate hours. */
+   Slot owners price by the DAY; longer stays derive from that with a
+   discount, the way a real condo lease prices a month cheaper than 30
+   separate days. No hourly tier — this is residential parking inside one
+   complex, where the realistic unit of rental is a day at minimum and the
+   common case is a month. (Commander directive: daily/weekly/monthly only.) */
 
 const RATE_PLANS = [
-  {key:'hour',  label:'Hourly',  unit:'hour',  suffix:'/hr',    multiplier:1,   discount:0    },
-  {key:'day',   label:'Daily',   unit:'day',   suffix:'/day',   multiplier:10,  discount:0.15 },
-  {key:'week',  label:'Weekly',  unit:'week',  suffix:'/week',  multiplier:60,  discount:0.25 },
-  {key:'month', label:'Monthly', unit:'month', suffix:'/month', multiplier:220, discount:0.35 },
+  {key:'day',   label:'Daily',   unit:'day',   suffix:'/day',   multiplier:1,  discount:0    },
+  {key:'week',  label:'Weekly',  unit:'week',  suffix:'/week',  multiplier:7,  discount:0.15 },
+  {key:'month', label:'Monthly', unit:'month', suffix:'/month', multiplier:30, discount:0.30 },
 ];
+
+/* Monthly is the headline plan — most residents rent a neighbour's slot for
+   the long haul, not for a weekend. */
+const DEFAULT_PLAN = 'month';
+
+/* Upper bound of the price filter. Daily rates here run ₱60–₱300, so the old
+   hourly-era ceiling of ₱100 would have hidden most of the inventory. */
+const MAX_DAY_RATE = 300;
 
 function planByKey(key){ return RATE_PLANS.find(p=>p.key===key) || RATE_PLANS[0]; }
 
 /* Rate for one unit of the given plan, rounded to a clean peso figure. */
 function rateFor(spot, planKey){
   const plan = planByKey(planKey);
+  if(plan.key==='day') return spot.price;
   const raw = spot.price * plan.multiplier * (1 - plan.discount);
-  if(plan.key==='hour') return spot.price;
   return Math.round(raw/5)*5;
 }
 
 function savingsPct(spot, planKey){
   const plan = planByKey(planKey);
-  if(plan.key==='hour') return 0;
+  if(plan.key==='day') return 0;
   const undiscounted = spot.price * plan.multiplier;
   return Math.round((1 - rateFor(spot,planKey)/undiscounted) * 100);
 }
@@ -199,14 +209,16 @@ const VACANCY_LEVELS = {
   full: {label:'Full',        color:'#dc2626', emoji:'🔴'},
 };
 
+/* Shared visitor bays — the ones nobody owns and everybody fights over.
+   These aren't rentable; they answer "can my guest park right now, or do I
+   tell them to circle?" Residents report fullness, Waze-style. */
 const PUBLIC_LOTS = [
-  {id:'sm-city',   name:'SM City Iloilo',            area:'Mandurriao', lat:10.7095, lng:122.5486, note:'Large covered mall parking · paid after free window'},
-  {id:'festive',   name:'Festive Walk / IBP',        area:'Mandurriao', lat:10.7128, lng:122.5432, note:'Iloilo Business Park open-air + parkade'},
-  {id:'robinsons', name:'Robinsons Place Iloilo',    area:'City Proper',lat:10.6969, lng:122.5701, note:'Mall parking, Ledesco entrance'},
-  {id:'atria',     name:'Atria Park District',       area:'Mandurriao', lat:10.7156, lng:122.5501, note:'Open lot beside the dining strip'},
-  {id:'gt-mall',   name:'GT Mall (formerly Amigo)',  area:'City Proper',lat:10.6952, lng:122.5678, note:'Downtown, close to plaza'},
-  {id:'plaza-lib', name:'Plaza Libertad',            area:'City Proper',lat:10.6931, lng:122.5732, note:'Street & plaza parking, free'},
-  {id:'megaworld', name:'Iloilo Convention Center',  area:'Mandurriao', lat:10.7180, lng:122.5455, note:'Large free lot on event-free days'},
+  {id:'vis-a',    name:'Tower A · Visitor Bay',      area:'Building A', lat:10.7118, lng:122.5487, note:'Ground level, beside the Tower A lobby driveway'},
+  {id:'vis-b',    name:'Tower B · Visitor Bay',      area:'Building B', lat:10.7121, lng:122.5491, note:'Ground level, near the Tower B entrance ramp'},
+  {id:'vis-c',    name:'Tower C · Visitor Bay',      area:'Building C', lat:10.7116, lng:122.5494, note:'Ground level, fronting the Tower C lobby'},
+  {id:'vis-d',    name:'Tower D · Visitor Bay',      area:'Building D', lat:10.7123, lng:122.5497, note:'Ground level, beside the Tower D drop-off'},
+  {id:'vis-podium', name:'Podium Visitor Deck',      area:'Shared',     lat:10.7120, lng:122.5490, note:'Upper podium — overflow visitor parking for all four towers'},
+  {id:'vis-drop', name:'Main Gate Drop-off',         area:'Shared',     lat:10.7114, lng:122.5484, note:'Loading / unloading only — 15 minutes, no overnight'},
 ];
 
 /* ---------- VACANCY STORE (swappable backend) ----------
@@ -215,7 +227,7 @@ const PUBLIC_LOTS = [
 
 const VacancyStore = {
   _local(){
-    try { return JSON.parse(localStorage.getItem('parkko_vacancy')||'{}'); }
+    try { return JSON.parse(localStorage.getItem('parkko_smdc_v2_vacancy')||'{}'); }
     catch(e){ return {}; }
   },
   getAll(){ return this._local(); },
@@ -224,7 +236,7 @@ const VacancyStore = {
     // but this runs on a user click, so a fresh Date is fine here)
     const all = this._local();
     all[lotId] = {level, ts:new Date().toISOString()};
-    try { localStorage.setItem('parkko_vacancy', JSON.stringify(all)); } catch(e){}
+    try { localStorage.setItem('parkko_smdc_v2_vacancy', JSON.stringify(all)); } catch(e){}
     return all;
   },
   // subscribe(cb): Firebase will push here; localStorage version is a no-op.
@@ -274,159 +286,159 @@ function seedReviews(names){
   }));
 }
 
+/* ---------- THE COMPLEX ----------
+   ParkKo is exclusive to SMDC Style Residences Iloilo. Four towers, one
+   shared podium. "Area" is no longer a district of the city — it is which
+   building your slot sits under. That single change is what turns a
+   city-wide marketplace into a building-wide one. */
+
+const COMPLEX = {
+  name: 'SMDC Style Residences',
+  city: 'Mandurriao, Iloilo City',
+  lat: 10.7120, lng: 122.5490,
+  buildings: ['Building A', 'Building B', 'Building C', 'Building D'],
+};
+
+/* Approximate tower positions on the podium, used to place map pins.
+   Mock coordinates for the prototype — not survey data. */
+const BUILDING_COORDS = {
+  'Building A': [10.7118, 122.5487],
+  'Building B': [10.7121, 122.5491],
+  'Building C': [10.7116, 122.5494],
+  'Building D': [10.7123, 122.5497],
+};
+
+/* Where a slot physically sits. Replaces the old street-parking taxonomy —
+   inside a condo there is no "driveway" or "street", only decks. */
+const SLOT_TYPES = ['Basement', 'Ground Level', 'Podium Level 2', 'Podium Level 3', 'Open Deck'];
+
+function slotAddress(spot){
+  return `${spot.area} · ${spot.level} · Slot ${spot.slot}`;
+}
+
 const INITIAL_SPOTS = [
   {
-    id:'s1', title:'Shaded Driveway near Jaro Cathedral', area:'Jaro',
-    address:'Locsin St, Jaro, Iloilo City', lat:10.7407, lng:122.5535,
-    price:25, type:'Private Driveway', capacity:'Sedan / SUV',
-    amenities:['covered','guarded'],
-    description:'Quiet residential driveway two blocks from Jaro Cathedral and the Jaro Plaza. Perfect for churchgoers, market visitors, or anyone attending events at the plaza. Easy in-and-out access, no gate hassle.',
-    host:{name:'Maria Suarez', initial:'M', since:'2022'},
-    availability:'Mon–Sun, 5:00 AM – 10:00 PM',
-    icon:0, gradient:0,
+    id:'s1', title:'Covered Basement Slot · Tower A', area:'Building A',
+    level:'Basement', slot:'B1-014',
+    address:'SMDC Style Residences, Mandurriao, Iloilo City', lat:10.7118, lng:122.5487,
+    price:180, type:'Basement', capacity:'Sedan / SUV',
+    amenities:['covered','guarded','cctv'],
+    description:'Fully covered basement slot directly under Tower A — a 40-second walk to the Tower A elevator lobby. Never wet, never in the sun. I work overseas most of the year and the slot just sits empty, so I would rather a neighbour used it.',
+    host:{name:'Maria Suarez', initial:'M', unit:'Unit 12F, Tower A', since:'2022'},
+    payout:{provider:'gcash', accountName:'Maria S. Suarez', masked:'•••• 0142'},
+    availability:'Long-term preferred · available now',
+    icon:1, gradient:0,
     reviews: seedReviews([
-      {author:'Jerome T.', rating:5, comment:'Ma-ayo gid! Safe kag malapit sa cathedral. Will book again.', date:'Jun 2026'},
-      {author:'Angeli R.', rating:4, comment:'Easy to find, host was very accommodating.', date:'May 2026'},
+      {author:'Jerome T.', rating:5, comment:'Ma-ayo gid — dry even during habagat, and the walk to the lift is nothing. Renewed for another 3 months.', date:'Jun 2026'},
+      {author:'Angeli R.', rating:4, comment:'Easy turnover, Ate Maria left the sticker with the guard as promised.', date:'May 2026'},
     ]),
   },
   {
-    id:'s2', title:'Covered Lot inside Iloilo Business Park', area:'Mandurriao',
-    address:'Iloilo Business Park, Mandurriao, Iloilo City', lat:10.7135, lng:122.5461,
-    price:40, type:'Covered Garage', capacity:'Sedan / SUV / Van',
-    amenities:['covered','cctv','guarded','ev'],
-    description:'Premium covered parking inside IBP, walking distance to Festive Walk, offices, and restaurants. CCTV monitored with 24/7 security guard and an EV charging point available.',
-    host:{name:'Carlo Deiparine', initial:'C', since:'2021'},
-    availability:'Mon–Sun, 24 hours',
-    icon:4, gradient:2,
-    reviews: seedReviews([
-      {author:'Nikki D.', rating:5, comment:'Super safe, may CCTV pa. Worth every peso.', date:'Jul 2026'},
-      {author:'Marc A.', rating:5, comment:'Best option near IBP offices, always available.', date:'Jun 2026'},
-      {author:'Ella G.', rating:4, comment:'A bit pricier but very secure.', date:'Apr 2026'},
-    ]),
-  },
-  {
-    id:'s3', title:'Open Lot beside SM City Iloilo', area:'Mandurriao',
-    address:'Diversion Rd, near SM City Iloilo, Mandurriao', lat:10.7071, lng:122.5498,
-    price:20, type:'Open Lot', capacity:'Sedan / SUV',
-    amenities:['guarded'],
-    description:'Convenient overflow parking right beside SM City Iloilo — skip the mall parking queue on weekends. Guard on duty during mall hours.',
-    host:{name:'Fely Rances', initial:'F', since:'2023'},
-    availability:'Mon–Sun, 9:00 AM – 9:00 PM',
-    icon:2, gradient:1,
-    reviews: seedReviews([
-      {author:'Patrick S.', rating:4, comment:'Saved me from the mall parking chaos on a Saturday.', date:'Jul 2026'},
-    ]),
-  },
-  {
-    id:'s4', title:'Guarded Street Parking near Robinsons Place', area:'City Proper',
-    address:'Gen. Luna St, near Robinsons Place Iloilo', lat:10.6970, lng:122.5644,
-    price:18, type:'Street Parking', capacity:'Sedan',
-    amenities:['guarded','cctv'],
-    description:'Officially designated street parking with a barangay-deputized guard, right beside Robinsons Place. Great for quick errands downtown.',
-    host:{name:'Ronald Gepiga', initial:'R', since:'2020'},
-    availability:'Mon–Sun, 6:00 AM – 11:00 PM',
-    icon:1, gradient:5,
-    reviews: [],
-  },
-  {
-    id:'s5', title:'Secure Garage at Festive Walk Parkade', area:'Mandurriao',
-    address:'Festive Walk Mall, IBP, Mandurriao', lat:10.7146, lng:122.5477,
-    price:35, type:'Covered Garage', capacity:'Sedan / SUV',
-    amenities:['covered','cctv','ev'],
-    description:'Multi-level parkade beside Festive Walk. Reserve ahead for concerts and mall events so you never circle around looking for a slot.',
-    host:{name:'Iloilo ParkWorks Co.', initial:'I', since:'2022'},
-    availability:'Mon–Sun, 24 hours',
-    icon:4, gradient:2,
-    reviews: seedReviews([
-      {author:'Baby L.', rating:5, comment:'Reserved before a concert, no stress finding a slot.', date:'Jun 2026'},
-    ]),
-  },
-  {
-    id:'s6', title:'Riverside Lot at Iloilo River Esplanade', area:'La Paz',
-    address:'Iloilo River Esplanade, La Paz, Iloilo City', lat:10.7167, lng:122.5661,
-    price:15, type:'Open Lot', capacity:'Sedan / Motorcycle',
-    amenities:['guarded'],
-    description:'Perfect if you are jogging, biking, or hanging out along the Esplanade. Flat, easy-access lot with a barangay tanod on watch during the day.',
-    host:{name:'Tessie Nava', initial:'T', since:'2023'},
-    availability:'Mon–Sun, 5:00 AM – 9:00 PM',
-    icon:3, gradient:0,
-    reviews: seedReviews([
-      {author:'Karl V.', rating:3, comment:'Cheap and fine, just gets full early on weekends.', date:'May 2026'},
-    ]),
-  },
-  {
-    id:'s7', title:'Driveway near University of San Agustin', area:'City Proper',
-    address:'General Luna St, near USA campus, Iloilo City', lat:10.6959, lng:122.5680,
-    price:20, type:'Private Driveway', capacity:'Sedan',
-    amenities:['covered'],
-    description:'Family-owned driveway a 3-minute walk from University of San Agustin. Popular with parents picking up students and visiting faculty.',
-    host:{name:'Josefina Tupas', initial:'J', since:'2021'},
-    availability:'Mon–Sat, 6:00 AM – 8:00 PM',
-    icon:0, gradient:3,
-    reviews: seedReviews([
-      {author:'Diane M.', rating:5, comment:'Very close to campus, kind host.', date:'Mar 2026'},
-    ]),
-  },
-  {
-    id:'s8', title:'Gated Lot near Central Philippine University', area:'Jaro',
-    address:'Lopez Jaena St, near CPU, Jaro, Iloilo City', lat:10.7276, lng:122.5477,
-    price:22, type:'Gated Lot', capacity:'Sedan / SUV',
-    amenities:['guarded','cctv'],
-    description:'Gated compound parking close to CPU, ideal for students, visiting alumni, and hospital visitors nearby.',
-    host:{name:'Edgar Solinap', initial:'E', since:'2022'},
-    availability:'Mon–Sun, 24 hours',
-    icon:1, gradient:4,
-    reviews:[],
-  },
-  {
-    id:'s9', title:'Mall-Adjacent Lot, Atria Park District', area:'Mandurriao',
-    address:'Atria Park District, Mandurriao, Iloilo City', lat:10.7112, lng:122.5445,
-    price:30, type:'Open Lot', capacity:'Sedan / SUV',
-    amenities:['cctv','wide'],
-    description:'Spacious lot with wide slots, great for SUVs and vans. A short walk to Atria Park District shops and restaurants.',
-    host:{name:'Grace Palma', initial:'G', since:'2023'},
-    availability:'Mon–Sun, 8:00 AM – 10:00 PM',
-    icon:5, gradient:1,
-    reviews: seedReviews([
-      {author:'Vince O.', rating:4, comment:'Wide slots, easy for my van.', date:'Jul 2026'},
-    ]),
-  },
-  {
-    id:'s10', title:'Covered Secure Parking, Smallville Complex', area:'Mandurriao',
-    address:'Smallville Complex, Mandurriao, Iloilo City', lat:10.7098, lng:122.5502,
-    price:28, type:'Covered Garage', capacity:'Sedan / SUV',
+    id:'s2', title:'Podium Slot beside Tower B Lift', area:'Building B',
+    level:'Podium Level 2', slot:'P2-032',
+    address:'SMDC Style Residences, Mandurriao, Iloilo City', lat:10.7121, lng:122.5491,
+    price:165, type:'Podium Level 2', capacity:'Sedan / SUV / Van',
     amenities:['covered','cctv','guarded'],
-    description:'Great for a night out at Smallville — covered, well-lit, and guarded so you can enjoy the bars and restaurants worry-free.',
-    host:{name:'Ronnie Bautista', initial:'R', since:'2020'},
-    availability:'Mon–Sun, 4:00 PM – 3:00 AM',
-    icon:4, gradient:5,
+    description:'Podium level 2, second bay from the Tower B elevator — the shortest walk to a lift of any slot I have seen in this building. Wide enough that I parked a Hiace in it for a year without drama. CCTV covers the whole row.',
+    host:{name:'Carlo Deiparine', initial:'C', unit:'Unit 8B, Tower B', since:'2021'},
+    payout:{provider:'maya', accountName:'Carlo M. Deiparine', masked:'•••• 0187'},
+    availability:'Available now · monthly',
+    icon:4, gradient:2,
     reviews: seedReviews([
-      {author:'Sam K.', rating:5, comment:'Late night parking, felt safe walking back to the car.', date:'Jun 2026'},
-      {author:'Trisha F.', rating:4, comment:'Good rates for the area.', date:'Apr 2026'},
+      {author:'Rhea M.', rating:5, comment:'Closest slot to a lift in the whole podium. Worth every peso when it is raining.', date:'Jun 2026'},
+      {author:'Dennis P.', rating:5, comment:'Fits my Montero with room to open the doors. Rare here.', date:'Apr 2026'},
     ]),
   },
   {
-    id:'s11', title:'Heritage Street Parking near Molo Church', area:'Molo',
-    address:'Molo Plaza, Molo, Iloilo City', lat:10.6958, lng:122.5464,
-    price:15, type:'Street Parking', capacity:'Sedan',
-    amenities:['guarded'],
-    description:'Steps from Molo Church and Molo Plaza — handy for weddings, fiestas, and the famous Molo pancit molo eateries nearby.',
-    host:{name:'Lorna Jardeleza', initial:'L', since:'2019'},
-    availability:'Mon–Sun, 6:00 AM – 9:00 PM',
-    icon:2, gradient:3,
-    reviews:[],
+    id:'s3', title:'Ground Level Slot · Tower C Lobby', area:'Building C',
+    level:'Ground Level', slot:'G-007',
+    address:'SMDC Style Residences, Mandurriao, Iloilo City', lat:10.7116, lng:122.5494,
+    price:200, type:'Ground Level', capacity:'Sedan / SUV',
+    amenities:['covered','guarded','cctv','wide'],
+    description:'Ground level, seven steps from the Tower C lobby door. The most convenient slot I own and the one I part with last — but I have moved to a unit in Tower A and no longer need two. Guard post is in direct line of sight.',
+    host:{name:'Jose Javellana', initial:'J', unit:'Unit 21C, Tower C', since:'2020'},
+    payout:{provider:'gcash', accountName:'Jose D. Javellana', masked:'•••• 0233'},
+    availability:'Available now · monthly or weekly',
+    icon:0, gradient:1,
+    reviews: seedReviews([
+      {author:'Kristine A.', rating:5, comment:'Cannot beat this location. Groceries straight from the car to the lift.', date:'Jul 2026'},
+      {author:'Mark V.', rating:5, comment:'Guard sees the car all day. Peace of mind when I am away for work.', date:'May 2026'},
+    ]),
   },
   {
-    id:'s12', title:'Guarded Lot near Capitol / Freedom Grandstand', area:'City Proper',
-    address:'Bonifacio Dr, near Iloilo Capitol, Iloilo City', lat:10.6963, lng:122.5630,
-    price:20, type:'Open Lot', capacity:'Sedan / SUV',
+    id:'s4', title:'Open Deck Slot · Tower D (budget)', area:'Building D',
+    level:'Open Deck', slot:'OD-021',
+    address:'SMDC Style Residences, Mandurriao, Iloilo City', lat:10.7123, lng:122.5497,
+    price:110, type:'Open Deck', capacity:'Sedan',
     amenities:['guarded','cctv'],
-    description:'Close to the Provincial Capitol and Freedom Grandstand — ideal during Dinagyang and other festival events.',
-    host:{name:'Iloilo ParkWorks Co.', initial:'I', since:'2022'},
-    availability:'Mon–Sun, 24 hours',
-    icon:1, gradient:2,
+    description:'Open deck slot on the far side of Tower D. It is uncovered — the car gets sun and rain — which is exactly why it is the cheapest slot in the complex. If you mainly need a guaranteed space and do not mind washing the car more often, this is the honest bargain.',
+    host:{name:'Liza Fernandez', initial:'L', unit:'Unit 5D, Tower D', since:'2023'},
+    payout:{provider:'gcash', accountName:'Liza P. Fernandez', masked:'•••• 0471'},
+    availability:'Available now',
+    icon:3, gradient:5,
     reviews: seedReviews([
-      {author:'Denise C.', rating:5, comment:'Booked this during Dinagyang, lifesaver.', date:'Jan 2026'},
+      {author:'Paolo G.', rating:4, comment:'Uncovered as advertised, no surprises. Half the price of the podium and I have a car cover.', date:'Jun 2026'},
+    ]),
+  },
+  {
+    id:'s5', title:'Tandem Basement Slot · Tower A (2 cars)', area:'Building A',
+    level:'Basement', slot:'B1-045/046',
+    address:'SMDC Style Residences, Mandurriao, Iloilo City', lat:10.7118, lng:122.5487,
+    price:280, type:'Basement', capacity:'2 cars (tandem)',
+    amenities:['covered','guarded','cctv','wide'],
+    description:'Tandem pair in the Tower A basement — two cars deep, one behind the other. Best for a household with two vehicles, or two neighbours who can coordinate keys. Priced for the pair, not per car.',
+    host:{name:'Ramon Tirador', initial:'R', unit:'Unit 15A, Tower A', since:'2021'},
+    payout:{provider:'bank', accountName:'Ramon L. Tirador', masked:'•••• 0092'},
+    availability:'Available Aug 2026 · monthly only',
+    icon:5, gradient:3,
+    reviews: seedReviews([
+      {author:'The Lims', rating:5, comment:'Two cars, one bill. We swap the inner car on weekends and it works fine.', date:'May 2026'},
+    ]),
+  },
+  {
+    id:'s6', title:'Podium Level 3 Slot · Tower B', area:'Building B',
+    level:'Podium Level 3', slot:'P3-058',
+    address:'SMDC Style Residences, Mandurriao, Iloilo City', lat:10.7121, lng:122.5491,
+    price:145, type:'Podium Level 3', capacity:'Sedan / SUV',
+    amenities:['covered','cctv'],
+    description:'Top podium deck, covered but breezy. It is one level further up so the ramp queue at 7 AM is shorter than the lower decks — a genuine advantage on weekday mornings that nobody mentions until they have lived here a while.',
+    host:{name:'Ana Belle Gonzales', initial:'A', unit:'Unit 19B, Tower B', since:'2022'},
+    payout:{provider:'maya', accountName:'Ana Belle Gonzales', masked:'•••• 0318'},
+    availability:'Available now · weekly or monthly',
+    icon:2, gradient:4,
+    reviews: seedReviews([
+      {author:'Ferdinand C.', rating:4, comment:'The shorter morning ramp queue is real. Saves me ten minutes daily.', date:'Jun 2026'},
+      {author:'Joy S.', rating:4, comment:'Covered and quiet. Slightly longer walk but I will take it.', date:'Mar 2026'},
+    ]),
+  },
+  {
+    id:'s7', title:'Ground Slot near Tower D Ramp', area:'Building D',
+    level:'Ground Level', slot:'G-033',
+    address:'SMDC Style Residences, Mandurriao, Iloilo City', lat:10.7123, lng:122.5497,
+    price:170, type:'Ground Level', capacity:'Sedan / SUV / Van',
+    amenities:['covered','guarded','cctv','wide'],
+    description:'Ground level near the Tower D ramp — easy in, easy out, no spiralling up the podium. Wide bay, so vans and pickups fit without the usual door-dent anxiety. Available while I am on assignment in Manila.',
+    host:{name:'Nestor Pabilona', initial:'N', unit:'Unit 9D, Tower D', since:'2020'},
+    payout:{provider:'gcash', accountName:'Nestor A. Pabilona', masked:'•••• 0664'},
+    availability:'Available now · 6-month term preferred',
+    icon:4, gradient:0,
+    reviews: seedReviews([
+      {author:'Grace L.', rating:5, comment:'In and out in seconds. My pickup fits with space to spare.', date:'Jul 2026'},
+    ]),
+  },
+  {
+    id:'s8', title:'Motorcycle Bay · Tower C Basement', area:'Building C',
+    level:'Basement', slot:'MC-012',
+    address:'SMDC Style Residences, Mandurriao, Iloilo City', lat:10.7116, lng:122.5494,
+    price:60, type:'Basement', capacity:'Motorcycle',
+    amenities:['covered','guarded','cctv'],
+    description:'Dedicated motorcycle bay in the Tower C basement, inside the marked two-wheeler row beside the guard post. Covered and monitored — the bike stays dry and nobody touches it.',
+    host:{name:'Ellen Trinidad', initial:'E', unit:'Unit 6C, Tower C', since:'2023'},
+    payout:{provider:'gcash', accountName:'Ellen R. Trinidad', masked:'•••• 0725'},
+    availability:'Available now',
+    icon:0, gradient:2,
+    reviews: seedReviews([
+      {author:'Rico B.', rating:5, comment:'Dry bike every morning and it is right by the guard. Cheap for the peace of mind.', date:'Jun 2026'},
     ]),
   },
 ];
@@ -436,11 +448,11 @@ const INITIAL_SPOTS = [
    Host-uploaded photos always win — this only fills the gaps. */
 
 const TYPE_SCENES = {
-  'Covered Garage':   [SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.openlot],
-  'Open Lot':         [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.parkade],
-  'Private Driveway': [SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot],
-  'Street Parking':   [SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.gated],
-  'Gated Lot':        [SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.openlot],
+  'Basement':        [SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.openlot],
+  'Ground Level':    [SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.driveway, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.parkade],
+  'Podium Level 2':  [SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.openlot],
+  'Podium Level 3':  [SAMPLE_PHOTOS.parkade, SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.garage, SAMPLE_PHOTOS.gated],
+  'Open Deck':       [SAMPLE_PHOTOS.openlot, SAMPLE_PHOTOS.street, SAMPLE_PHOTOS.gated, SAMPLE_PHOTOS.parkade],
 };
 
 function withSamplePhotos(spot, i){
@@ -454,7 +466,10 @@ function withSamplePhotos(spot, i){
 
 const SEEDED_SPOTS = INITIAL_SPOTS.map(withSamplePhotos);
 
-const AREAS = ['All Areas', ...Array.from(new Set(INITIAL_SPOTS.map(s=>s.area)))];
+/* Buildings come from the complex definition, not from whatever the seed
+   data happens to contain — a building with no slots listed must still be
+   selectable, otherwise Tower D disappears the moment its last slot is taken. */
+const AREAS = ['All Buildings', ...COMPLEX.buildings];
 
 /* ---------- HELPERS ---------- */
 
@@ -519,7 +534,7 @@ function compressImage(file){
    is a real possibility once a few listings carry photos. */
 function saveSpots(spots){
   try {
-    localStorage.setItem('parkko_spots', JSON.stringify(spots));
+    localStorage.setItem('parkko_smdc_v2_spots', JSON.stringify(spots));
     return {ok:true};
   } catch(err){
     return {ok:false, error:'Storage full — try fewer or smaller photos.'};
@@ -528,7 +543,7 @@ function saveSpots(spots){
 
 function loadSpots(){
   try {
-    const raw = localStorage.getItem('parkko_spots');
+    const raw = localStorage.getItem('parkko_smdc_v2_spots');
     if(!raw) return null;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) && parsed.length ? parsed : null;
@@ -550,18 +565,236 @@ const DOC_TYPES = [
   {key:'vehicle', label:'Vehicle photo',           icon:'🚗', kind:'image'},
 ];
 
+/* ---------- RESIDENCY (OWNERS ONLY) ----------
+   The two sides of this marketplace are NOT symmetric.
+
+   Visitors just book. Asking a guest to prove they live here would defeat
+   the whole point — they are here precisely because they do not.
+
+   Owners list slots and take money for them, so they must prove the slot
+   is theirs to rent: which tower, which unit, and a document tying them to
+   it. This is what keeps the inventory exclusive to SMDC Style Residences —
+   an outsider cannot inject a listing from across town. */
+
+const OWNER_DOC_TYPES = [
+  {key:'title',  label:'Condo title / lease contract', icon:'📜', kind:'image'},
+  {key:'slotdoc',label:'Parking slot title or assignment', icon:'🅿️', kind:'image'},
+  {key:'govid',  label:'Government ID',                icon:'🆔', kind:'image'},
+];
+
+/* ---------- OWNER SUBSCRIPTION ----------
+   ParkKo's revenue comes from owners, not from booking commissions: a flat
+   ₱500/month to keep listings live. An owner clears ₱500 back on roughly
+   three days of a mid-priced slot, so the maths is easy to explain — and
+   visitors pay only the slot rate, which keeps the demand side frictionless. */
+
+const SUBSCRIPTION = {
+  price: 500,
+  period: 'month',
+  label: 'Owner Plan',
+  perks: [
+    'List unlimited slots across your units',
+    'Keep 100% of what you charge — no booking commission',
+    'Owner ↔ booker chat and booking management',
+    'Verified-resident badge on every listing',
+  ],
+};
+
+function blankProfile(){
+  return {
+    verified:false, name:'', plate:'', docs:{},
+    // owner-side residency
+    resident:false, building:'', unit:'', ownerDocs:{},
+    // owner-side subscription
+    subscribed:false, subSince:'', subRenews:'',
+    // owner-side payout wallet — where a booker's payment actually lands
+    wallet:{provider:'gcash', number:'', accountName:''},
+    // people the owner has delegated day-to-day management to
+    cohosts:[],
+  };
+}
+
+/* ---------- CO-HOSTS ----------
+   Airbnb's model, scoped to a parking slot. An owner who works abroad still
+   needs someone on the ground to answer a booker at 9 PM or deal with a car
+   that has not moved. A co-host can run the slot day-to-day but can never
+   touch the money or give the slot away:
+
+     · MONEY stays with the owner. A co-host cannot change the payout wallet,
+       and payments still go straight to the owner's account. This is the one
+       rule that makes delegation safe.
+     · The OWNER can always revoke, instantly.
+
+   Permissions are explicit rather than a single "co-host" role, because
+   "answer my messages" and "handle overstays" are very different levels of
+   trust to hand a neighbour. */
+
+const COHOST_PERMISSIONS = [
+  {key:'messages',  label:'Reply to bookers',      hint:'Answer questions and coordinate arrival'},
+  {key:'bookings',  label:'Manage bookings',       hint:'Confirm, extend, or release a booking'},
+  {key:'overstay',  label:'Handle overstays',      hint:'Receive overstay alerts and chase the driver'},
+  {key:'listing',   label:'Edit the listing',      hint:'Update photos, description, and availability'},
+  {key:'pricing',   label:'Change pricing',        hint:'Set the daily rate — affects your income'},
+];
+
+/* Deliberately NOT delegable, at any permission level. */
+const COHOST_NEVER = [
+  'Change your payout wallet',
+  'Receive booking payments',
+  'Remove the listing or transfer it',
+  'Add or remove other co-hosts',
+];
+
+function cohostPermLabel(key){
+  const p = COHOST_PERMISSIONS.find(x=>x.key===key);
+  return p ? p.label : key;
+}
+
+/* ---------- NOTIFICATIONS ----------
+   One inbox, three audiences. Each notice records who it is FOR so the same
+   overstay event can say different things to the owner, the car still in the
+   slot, and the person waiting for it. */
+
+function loadNotices(){
+  try { return JSON.parse(localStorage.getItem('parkko_smdc_v2_notices')||'[]'); }
+  catch(err){ return []; }
+}
+function saveNotices(list){
+  try { localStorage.setItem('parkko_smdc_v2_notices', JSON.stringify(list)); return {ok:true}; }
+  catch(err){ return {ok:false}; }
+}
+
+/* Build the three-party notice set for one overstaying booking.
+   `nextBooking` may be null — not every overstay blocks someone. */
+function buildOverstayNotices(booking, spot, state, nextBooking, nowIso){
+  const where = spot ? slotAddress(spot) : 'your slot';
+  const over = fmtDuration(state.mins - OVERSTAY.graceMinutes);
+  const fee = spot ? overstayFeeFor(spot, Math.ceil((state.mins - OVERSTAY.graceMinutes)/60)) : 0;
+  const key = `${booking.id}:${Math.floor((state.mins - OVERSTAY.graceMinutes)/60)}`;
+
+  const notices = [
+    {
+      id: uid('n'), key, ts: nowIso, kind:'overstay', audience:'owner',
+      severity:'warn', bookingId: booking.id, ref: booking.ref,
+      title:'Your slot is still occupied',
+      body:`Booking ${booking.ref} at ${where} ended ${over} ago and the slot has not been vacated.`
+           + (nextBooking ? ` The next booking (${nextBooking.ref}) is already due.` : '')
+           + (fee ? ` An overstay charge of ₱${fee} applies so far.` : ''),
+    },
+    {
+      id: uid('n'), key, ts: nowIso, kind:'overstay', audience:'occupant',
+      severity:'urgent', bookingId: booking.id, ref: booking.ref,
+      title:'Your booking has ended — please move your vehicle',
+      body:`Your slot at ${where} was due ${over} ago.`
+           + (nextBooking ? ' Someone has already paid for this slot and is waiting.' : '')
+           + (fee ? ` An overstay charge of ₱${fee} has started accruing.` : '')
+           + ' Extend in the app if you still need it.',
+    },
+  ];
+
+  if(nextBooking){
+    notices.push({
+      id: uid('n'), key, ts: nowIso, kind:'overstay', audience:'next',
+      severity:'warn', bookingId: nextBooking.id, ref: nextBooking.ref,
+      title:'Your slot is running late',
+      body:`The previous car at ${where} has not left yet (${over} past its end). `
+           + 'The owner and the driver have both been notified. '
+           + 'You will not be charged for time you cannot use.',
+    });
+  }
+
+  return notices;
+}
+
+/* ---------- PAYOUT WALLETS ----------
+   ParkKo never holds the rent. A booker pays the owner's registered wallet
+   directly; the platform only issues the receipt and earns from the owner's
+   ₱500/month plan. That is why an owner must register a wallet before a
+   listing can go live — without one there is nowhere for the money to go. */
+
+const WALLET_PROVIDERS = [
+  {key:'gcash',   label:'GCash',        icon:'📱', hint:'09XX XXX XXXX'},
+  {key:'maya',    label:'Maya',         icon:'💜', hint:'09XX XXX XXXX'},
+  {key:'bank',    label:'Bank transfer',icon:'🏦', hint:'Account number'},
+];
+
+function walletLabel(key){
+  const w = WALLET_PROVIDERS.find(p=>p.key===key);
+  return w ? `${w.icon} ${w.label}` : key;
+}
+
+/* Never render a full wallet number back to a booker. */
+function maskWallet(num){
+  const s = String(num||'').replace(/\s+/g,'');
+  if(s.length<4) return '••••';
+  return '•••• ' + s.slice(-4);
+}
+
+function hasWallet(profile){
+  return !!(profile.wallet && profile.wallet.number && profile.wallet.accountName);
+}
+
+/* ---------- OVERSTAY ----------
+   The failure mode that breaks a shared slot: a booking ends, the car is
+   still there, and the next booker arrives to find their paid slot occupied.
+   Nobody finds out until someone is already blocked in the driveway.
+
+   ParkKo notifies all three parties the moment a booking lapses:
+     · the OWNER          — it's their asset and their guest to chase
+     · the OCCUPYING car  — most overstays are simply forgetting
+     · the NEXT booker    — so they can wait, or ask for another slot,
+                            instead of arriving to a blocked bay
+
+   A grace period runs first, because a ten-minute overrun is not a dispute. */
+
+const OVERSTAY = {
+  graceMinutes: 30,
+  // What the owner may charge for time past the grace period. Shown to the
+  // booker up-front so it is never a surprise on the receipt.
+  hourlyPenaltyPct: 0.25,   // of the daily rate, per hour overstayed
+};
+
+function overstayFeeFor(spot, hoursOver){
+  if(hoursOver<=0) return 0;
+  return Math.round(spot.price * OVERSTAY.hourlyPenaltyPct * hoursOver);
+}
+
+/* Minutes a booking is past its end. Positive means overstaying.
+   `now` is passed in — never read the clock at module load. */
+function minutesOverdue(booking, now){
+  if(!booking || !booking.endsOn) return 0;
+  // A booking runs to the END of its last day.
+  const due = new Date(booking.endsOn + 'T23:59:59');
+  return Math.floor((now - due) / 60000);
+}
+
+function overstayState(booking, now){
+  const mins = minutesOverdue(booking, now);
+  if(mins <= 0) return {status:'ok', mins:0};
+  if(mins <= OVERSTAY.graceMinutes) return {status:'grace', mins};
+  return {status:'over', mins};
+}
+
+function fmtDuration(mins){
+  const h = Math.floor(mins/60), m = mins%60;
+  if(h<=0) return `${m} min`;
+  if(h<24) return m ? `${h}h ${m}m` : `${h}h`;
+  const d = Math.floor(h/24);
+  return `${d}d ${h%24}h`;
+}
+
 function loadProfile(){
   try {
-    const raw = localStorage.getItem('parkko_profile');
-    return raw ? JSON.parse(raw) : {verified:false, name:'', plate:'', docs:{}};
+    const raw = localStorage.getItem('parkko_smdc_v2_profile');
+    return raw ? {...blankProfile(), ...JSON.parse(raw)} : blankProfile();
   } catch(err){
-    return {verified:false, name:'', plate:'', docs:{}};
+    return blankProfile();
   }
 }
 
 function saveProfile(profile){
   try {
-    localStorage.setItem('parkko_profile', JSON.stringify(profile));
+    localStorage.setItem('parkko_smdc_v2_profile', JSON.stringify(profile));
     return {ok:true};
   } catch(err){
     return {ok:false, error:'Storage full — documents are large; try re-taking with lower resolution.'};
@@ -574,7 +807,7 @@ function saveProfile(profile){
 
 function loadChats(){
   try {
-    const raw = localStorage.getItem('parkko_chats');
+    const raw = localStorage.getItem('parkko_smdc_v2_chats');
     return raw ? JSON.parse(raw) : {};
   } catch(err){
     return {};
@@ -582,20 +815,20 @@ function loadChats(){
 }
 
 function loadSaved(){
-  try { return JSON.parse(localStorage.getItem('parkko_saved')||'[]'); }
+  try { return JSON.parse(localStorage.getItem('parkko_smdc_v2_saved')||'[]'); }
   catch(err){ return []; }
 }
 function persistSaved(ids){
-  try { localStorage.setItem('parkko_saved', JSON.stringify(ids)); } catch(err){}
+  try { localStorage.setItem('parkko_smdc_v2_saved', JSON.stringify(ids)); } catch(err){}
 }
 
 function saveChats(chats){
-  try { localStorage.setItem('parkko_chats', JSON.stringify(chats)); return {ok:true}; }
+  try { localStorage.setItem('parkko_smdc_v2_chats', JSON.stringify(chats)); return {ok:true}; }
   catch(err){ return {ok:false}; }
 }
 
 const HOST_REPLIES = [
-  "Hi! Yes, the spot's available — just confirm your booking and message me when you're near.",
+  "Hi! Yes, the slot's available — just confirm your booking and message me when you're near.",
   "Thanks for reaching out! Gate code is sent once your booking is confirmed. 🙂",
   "Sure, that works. There's space for an SUV, no problem.",
   "Salamat! I'll keep the slot reserved for you. Let me know your arrival time.",
@@ -724,10 +957,10 @@ function SpotCard({spot, onOpen, saved, onToggleSave}){
             {rating ? <React.Fragment>★ {rating}</React.Fragment> : 'New'}
           </span>
         </div>
-        <p className="card-area">{spot.area} · {spot.type}</p>
+        <p className="card-area">{spot.area}{spot.level?` · ${spot.level}`:''}{spot.slot?` · Slot ${spot.slot}`:''}</p>
         <div className="card-footer">
-          <div className="price">₱{spot.price}<span> / hour</span></div>
-          <div style={{fontSize:12.5,color:'var(--muted)'}}>₱{rateFor(spot,'month')}/mo</div>
+          <div className="price">₱{rateFor(spot,'month')}<span> / month</span></div>
+          <div style={{fontSize:12.5,color:'var(--muted)'}}>₱{spot.price}/day</div>
         </div>
       </div>
     </div>
@@ -738,19 +971,19 @@ function SpotCard({spot, onOpen, saved, onToggleSave}){
 
 function BrowseView({spots, onOpen, savedIds, onToggleSave}){
   const [q,setQ] = useState('');
-  const [area,setArea] = useState('All Areas');
+  const [area,setArea] = useState('All Buildings');
   const [sort,setSort] = useState('rating');
   const [heroIdx,setHeroIdx] = useState(0);
   const [typeFilter,setTypeFilter] = useState('All');
-  const [maxPrice,setMaxPrice] = useState(100);
+  const [maxPrice,setMaxPrice] = useState(MAX_DAY_RATE);
   const [activeAmenities,setActiveAmenities] = useState([]);
   const [showFilters,setShowFilters] = useState(false);
 
-  const SPOT_TYPES = ['All','Covered Garage','Open Lot','Private Driveway','Street Parking','Gated Lot'];
+  const SPOT_TYPES = ['All', ...SLOT_TYPES];
   function toggleAmenityFilter(k){
     setActiveAmenities(prev=> prev.includes(k) ? prev.filter(a=>a!==k) : [...prev,k]);
   }
-  const activeFilterCount = (typeFilter!=='All'?1:0) + (maxPrice<100?1:0) + activeAmenities.length;
+  const activeFilterCount = (typeFilter!=='All'?1:0) + (maxPrice<MAX_DAY_RATE?1:0) + activeAmenities.length;
 
   /* Slow crossfade between Iloilo landmarks; long enough to read as
      atmosphere rather than a carousel demanding attention. */
@@ -761,8 +994,8 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
 
   const filtered = useMemo(()=>{
     let list = spots.filter(s=>{
-      const matchesArea = area==='All Areas' || s.area===area;
-      const text = (s.title+' '+s.area+' '+s.address+' '+s.type).toLowerCase();
+      const matchesArea = area==='All Buildings' || s.area===area;
+      const text = (s.title+' '+s.area+' '+(s.level||'')+' '+(s.slot||'')+' '+s.type).toLowerCase();
       const matchesQ = q.trim()==='' || text.includes(q.trim().toLowerCase());
       const matchesType = typeFilter==='All' || s.type===typeFilter;
       const matchesPrice = s.price <= maxPrice;
@@ -798,11 +1031,15 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
           ))}
         </div>
         <div className="hero-credit">📍 {HERO_PHOTOS[heroIdx].caption} · {HERO_PHOTOS[heroIdx].credit}</div>
-        <h1>Find parking anywhere in Iloilo City</h1>
-        <p>Rent a driveway, garage, or lot from a local host — by the hour, day, week, or month. Search by mall, church, campus, or barangay.</p>
+        <h1>Parking inside {COMPLEX.name}</h1>
+        <p>
+          Rent an unused slot from a neighbour — by the day, week, or month.
+          Owners earn from space that sits empty; visitors stop circling the podium.
+          Buildings A, B, C and D only.
+        </p>
         <div className="searchbar">
           <span>🔍</span>
-          <input placeholder="Try “Jaro”, “SM City”, “Molo”, “IBP”…" value={q} onChange={e=>setQ(e.target.value)} />
+          <input placeholder="Try “Tower A”, “basement”, “covered”, “B1-014”…" value={q} onChange={e=>setQ(e.target.value)} />
           <button onClick={()=>{}}>Search</button>
         </div>
         <div className="filters">
@@ -813,7 +1050,7 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
       </div>
       <div className="wrap">
         <div className="toolbar">
-          <h2>{filtered.length} spot{filtered.length!==1?'s':''} available</h2>
+          <h2>{filtered.length} slot{filtered.length!==1?'s':''} available</h2>
           <div style={{display:'flex',gap:10,alignItems:'center'}}>
             <button className={"filter-btn"+(activeFilterCount>0?' has':'')} onClick={()=>setShowFilters(v=>!v)}>
               ⚙ Filters{activeFilterCount>0?` · ${activeFilterCount}`:''}
@@ -830,7 +1067,7 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
         {showFilters && (
           <div className="filter-panel">
             <div className="filter-group">
-              <label className="filter-label">Type</label>
+              <label className="filter-label">Parking level</label>
               <div className="filter-chips">
                 {SPOT_TYPES.map(t=>(
                   <button key={t} className={"fchip"+(typeFilter===t?' active':'')} onClick={()=>setTypeFilter(t)}>{t}</button>
@@ -838,8 +1075,8 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
               </div>
             </div>
             <div className="filter-group">
-              <label className="filter-label">Max price: <b>₱{maxPrice}{maxPrice>=100?'+':''}/hr</b></label>
-              <input type="range" min="10" max="100" step="5" value={maxPrice}
+              <label className="filter-label">Max price: <b>₱{maxPrice}{maxPrice>=MAX_DAY_RATE?'+':''}/day</b></label>
+              <input type="range" min="50" max={MAX_DAY_RATE} step="10" value={maxPrice}
                 onChange={e=>setMaxPrice(Number(e.target.value))} className="filter-range" />
             </div>
             <div className="filter-group">
@@ -853,13 +1090,13 @@ function BrowseView({spots, onOpen, savedIds, onToggleSave}){
               </div>
             </div>
             {activeFilterCount>0 && (
-              <button className="filter-clear" onClick={()=>{setTypeFilter('All');setMaxPrice(100);setActiveAmenities([]);}}>Clear all filters</button>
+              <button className="filter-clear" onClick={()=>{setTypeFilter('All');setMaxPrice(MAX_DAY_RATE);setActiveAmenities([]);}}>Clear all filters</button>
             )}
           </div>
         )}
 
         {filtered.length===0 ? (
-          <div className="empty">No spots match your search. Try another area or keyword.</div>
+          <div className="empty">No slots match your search. Try another building or clear the filters.</div>
         ) : (
           <div className="grid">
             {filtered.map(s=><SpotCard key={s.id} spot={s} onOpen={onOpen} saved={savedIds.includes(s.id)} onToggleSave={onToggleSave} />)}
@@ -891,7 +1128,11 @@ function MapView({spots, onOpen}){
 
   useEffect(()=>{
     if(!mapRef.current) return;
-    const map = L.map(mapRef.current,{scrollWheelZoom:true}).setView([10.7202,122.5621], 14);
+    /* Zoom 18, not the old city-wide 14 — everything on this map sits inside
+       one property, so a district view would render every pin on top of the
+       next. minZoom keeps the user from panning off into the rest of Iloilo. */
+    const map = L.map(mapRef.current,{scrollWheelZoom:true, minZoom:16})
+      .setView([COMPLEX.lat, COMPLEX.lng], 18);
     mapObj.current = map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
       attribution:'&copy; OpenStreetMap contributors', maxZoom:19,
@@ -899,14 +1140,14 @@ function MapView({spots, onOpen}){
 
     if(showRentals) spots.forEach(spot=>{
       const icon = L.divIcon({
-        className:'', html:`<div class="price-pin">₱${spot.price}/hr</div>`, iconSize:[70,30], iconAnchor:[35,15],
+        className:'', html:`<div class="price-pin">₱${rateFor(spot,'month')}/mo</div>`, iconSize:[76,30], iconAnchor:[38,15],
       });
       const marker = L.marker([spot.lat, spot.lng], {icon}).addTo(map);
       const rating = fmtRating(spot);
       marker.bindPopup(`
         <div class="popup-card">
           <h4>${spot.title}</h4>
-          <p>📍 ${spot.area} ${rating ? '· ★ '+rating : '· New listing'}</p>
+          <p>📍 ${spot.area} · ${spot.level||''} · Slot ${spot.slot||'—'} ${rating ? '· ★ '+rating : '· New listing'}</p>
           <button onclick="window.__parkkoViewSpot('${spot.id}')">View details</button>
         </div>`);
     });
@@ -930,7 +1171,7 @@ function MapView({spots, onOpen}){
       marker.bindPopup(`
         <div class="popup-card">
           <h4>🅿️ ${lot.name}</h4>
-          <p>📍 ${lot.area} · Free / public</p>
+          <p>📍 ${lot.area} · Shared visitor parking</p>
           <p style="font-size:11px;color:#64748b">${lot.note}</p>
           ${statusLine}
           <p style="font-size:11px;font-weight:700;margin-top:6px">How full is it now?</p>
@@ -946,30 +1187,32 @@ function MapView({spots, onOpen}){
   return (
     <div className="wrap">
       <div className="toolbar">
-        <h2>Parking map</h2>
+        <h2>Site map · {COMPLEX.name}</h2>
       </div>
       <div className="map-legend">
         <button className={"legend-toggle"+(showRentals?' on':'')} onClick={()=>setShowRentals(v=>!v)}>
-          <span className="legend-swatch rental"></span> Rentals ({spots.length})
+          <span className="legend-swatch rental"></span> Slots for rent ({spots.length})
         </button>
         <button className={"legend-toggle"+(showPublic?' on':'')} onClick={()=>setShowPublic(v=>!v)}>
-          <span className="legend-swatch public"></span> Free / public ({PUBLIC_LOTS.length})
+          <span className="legend-swatch public"></span> Visitor bays ({PUBLIC_LOTS.length})
         </button>
         <span className="legend-vac">🟢 open · 🟡 some · 🔴 full{reportedCount>0?` · ${reportedCount} reported`:''}</span>
       </div>
       <div className="map-wrap"><div id="leaflet-map" ref={mapRef}></div></div>
-      <p className="muted" style={{marginTop:10,fontSize:13}}>Teal pins are rentals — tap to book. Grey "P" pins are free/public lots (malls, plazas); tap one to see how full it is or report the current status yourself.</p>
+      <p className="muted" style={{marginTop:10,fontSize:13}}>Teal pins are slots you can rent — tap to book. Grey "P" pins are the shared visitor bays; tap one to see how full it is, or report the current status yourself so the next guest knows before they drive in.</p>
     </div>
   );
 }
 
 /* ---------- HOST FORM ---------- */
 
-function ListSpotView({onPublish}){
-  const [form,setForm] = useState({
-    title:'', area:AREAS[1]||'Jaro', address:'', price:'', type:'Private Driveway',
-    capacity:'Sedan', description:'', availability:'', amenities:[], photos:[],
+function ListSpotView({onPublish, profile, onRequestResidency, onRequestSubscribe, onRequestWallet, onManageCohosts}){
+  const blankForm = ()=>({
+    title:'', area:profile.building||COMPLEX.buildings[0], level:'Basement', slot:'',
+    price:'', type:'Basement', capacity:'Sedan',
+    description:'', availability:'', amenities:[], photos:[],
   });
+  const [form,setForm] = useState(blankForm);
   const [done,setDone] = useState(false);
 
   function toggleAmenity(k){
@@ -977,82 +1220,171 @@ function ListSpotView({onPublish}){
   }
   function submit(e){
     e.preventDefault();
-    if(!form.title || !form.address || !form.price) return;
-    const areaCoords = {
-      'Jaro':[10.739,122.552],'Mandurriao':[10.711,122.548],'City Proper':[10.696,122.564],
-      'La Paz':[10.716,122.565],'Molo':[10.696,122.548],
-    };
-    const base = areaCoords[form.area] || [10.7202,122.5621];
-    const jitter = ()=> (Math.random()-0.5)*0.01;
+    if(!form.title || !form.slot || !form.price) return;
+    const base = BUILDING_COORDS[form.area] || [COMPLEX.lat, COMPLEX.lng];
+    // Slots sit metres apart inside one complex, so the jitter is a tenth of
+    // what a city-wide map used — otherwise pins land outside the property.
+    const jitter = ()=> (Math.random()-0.5)*0.0006;
     const newSpot = {
       id: uid('s'),
-      title: form.title, area: form.area, address: form.address,
+      title: form.title, area: form.area,
+      level: form.level, slot: form.slot.trim().toUpperCase(),
+      address: `${COMPLEX.name}, ${COMPLEX.city}`,
       lat: base[0]+jitter(), lng: base[1]+jitter(),
       price: Number(form.price)||1, type: form.type, capacity: form.capacity,
       amenities: form.amenities, description: form.description || 'No description provided yet.',
-      host:{name:'You (New Host)', initial:'Y', since:'2026'},
-      availability: form.availability || 'Flexible — message host',
+      host:{name: profile.name || 'You (New Owner)', initial:(profile.name||'Y').charAt(0).toUpperCase(),
+            unit: profile.unit ? `${profile.unit}, ${profile.building}` : '', since:'2026'},
+      /* Payment destination travels with the listing. Only the provider,
+         account name, and last four digits — never the full number. */
+      payout:{
+        provider: profile.wallet.provider,
+        accountName: profile.wallet.accountName,
+        masked: maskWallet(profile.wallet.number),
+      },
+      availability: form.availability || 'Flexible — message the owner',
       icon: Math.floor(Math.random()*ICONS.length), gradient: Math.floor(Math.random()*GRADIENTS.length),
       photos: form.photos,
       reviews:[],
     };
     onPublish(newSpot);
     setDone(true);
-    setForm({title:'',area:AREAS[1]||'Jaro',address:'',price:'',type:'Private Driveway',capacity:'Sedan',description:'',availability:'',amenities:[],photos:[]});
+    setForm(blankForm());
     setTimeout(()=>setDone(false),4500);
+  }
+
+  /* The exclusivity gate. Anyone may browse and book, but only a verified
+     resident owner can put a slot on the market. */
+  if(!profile.resident){
+    return (
+      <div className="wrap">
+        <div className="panel" style={{textAlign:'center'}}>
+          <div style={{fontSize:44}}>🏢</div>
+          <h2>Only residents can list a slot</h2>
+          <p className="muted" style={{maxWidth:460,margin:'8px auto 0'}}>
+            ParkKo carries parking inside {COMPLEX.name} and nowhere else. To
+            rent out your slot, verify your unit once — building, unit number,
+            and proof the slot is yours. After that, listing takes a minute.
+          </p>
+          <button className="btn-primary" style={{marginTop:18}} onClick={onRequestResidency}>
+            Verify my unit
+          </button>
+          <p className="muted" style={{fontSize:12,marginTop:14}}>
+            Looking for parking instead? Browsing and booking need no verification.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  /* Second gate: verified residents still need an active Owner Plan. This is
+     how ParkKo earns — owners subscribe, visitors pay nothing extra. */
+  if(!profile.subscribed){
+    return (
+      <div className="wrap">
+        <div className="panel" style={{textAlign:'center'}}>
+          <div style={{fontSize:44}}>🔑</div>
+          <h2>Activate your Owner Plan to list</h2>
+          <p className="muted" style={{maxWidth:470,margin:'8px auto 0'}}>
+            You're verified as {profile.unit}, {profile.building}. Listing runs on
+            the {SUBSCRIPTION.label} — <b>₱{SUBSCRIPTION.price}/{SUBSCRIPTION.period}</b>,
+            unlimited slots, and no commission taken from what you charge.
+          </p>
+          <div className="sub-math" style={{maxWidth:470,margin:'16px auto 0',textAlign:'left'}}>
+            💡 At ₱165/day, about three days of rental covers the monthly fee.
+            Everything after that is yours to keep.
+          </div>
+          <button className="btn-primary" style={{marginTop:18}} onClick={onRequestSubscribe}>
+            Subscribe · ₱{SUBSCRIPTION.price}/month
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  /* Third gate: no payout wallet, nowhere for the booker's money to land. */
+  if(!hasWallet(profile)){
+    return (
+      <div className="wrap">
+        <div className="panel" style={{textAlign:'center'}}>
+          <div style={{fontSize:44}}>💰</div>
+          <h2>Register where you get paid</h2>
+          <p className="muted" style={{maxWidth:470,margin:'8px auto 0'}}>
+            Bookers pay you directly — ParkKo never holds your rent and takes no
+            cut of it. Add the GCash, Maya, or bank account the money should land
+            in, and every booking issues a receipt naming it.
+          </p>
+          <button className="btn-primary" style={{marginTop:18}} onClick={onRequestWallet}>
+            Add payout wallet
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="wrap">
       <div className="panel">
-        <h2>List your parking spot</h2>
-        <p className="muted">Got a driveway, garage, or extra lot in Iloilo City? Publish it in a minute and start earning — hourly, daily, weekly, or monthly.</p>
+        <h2>List your parking slot</h2>
+        <p className="muted">
+          Your slot sits empty while you are at work or abroad. Put it to work —
+          rent it by the day, week, or month to neighbours and visitors who need
+          it. Listing takes about a minute.
+        </p>
+        <div className="verified-strip">
+          ✓ Verified resident · {profile.unit}, {profile.building} · {SUBSCRIPTION.label} active
+          {profile.subRenews ? ` · renews ${profile.subRenews}` : ''}
+        </div>
+        <div className="owner-tools">
+          <button type="button" className="owner-tool" onClick={onManageCohosts}>
+            👥 Co-hosts{(profile.cohosts||[]).length ? ` (${profile.cohosts.length})` : ''}
+          </button>
+          <button type="button" className="owner-tool" onClick={onRequestWallet}>
+            💰 Payout · {walletLabel(profile.wallet.provider)} {maskWallet(profile.wallet.number)}
+          </button>
+        </div>
         <form onSubmit={submit}>
           <div className="form-row">
             <div className="field">
               <label>Listing title</label>
-              <input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Covered driveway near SM City" />
+              <input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Covered basement slot near Tower A lift" />
             </div>
           </div>
           <div className="form-row">
             <div className="field">
-              <label>Photos of your spot</label>
+              <label>Photos of your slot</label>
               <PhotoUploader photos={form.photos} onChange={photos=>setForm(f=>({...f,photos}))} />
             </div>
           </div>
           <div className="form-row">
             <div className="field">
-              <label>Area / District</label>
+              <label>Building</label>
               <select value={form.area} onChange={e=>setForm({...form,area:e.target.value})}>
-                {AREAS.filter(a=>a!=='All Areas').map(a=><option key={a} value={a}>{a}</option>)}
+                {COMPLEX.buildings.map(a=><option key={a} value={a}>{a}</option>)}
               </select>
             </div>
             <div className="field">
-              <label>Street address</label>
-              <input required value={form.address} onChange={e=>setForm({...form,address:e.target.value})} placeholder="e.g. Rizal St, Iloilo City" />
+              <label>Parking level</label>
+              <select value={form.level} onChange={e=>setForm({...form,level:e.target.value, type:e.target.value})}>
+                {SLOT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Slot number</label>
+              <input required value={form.slot} onChange={e=>setForm({...form,slot:e.target.value})} placeholder="e.g. B1-014" />
             </div>
           </div>
           <div className="form-row">
             <div className="field">
-              <label>Price per hour (₱)</label>
-              <input required type="number" min="1" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} placeholder="25" />
+              <label>Price per day (₱)</label>
+              <input required type="number" min="1" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} placeholder="150" />
               {Number(form.price)>0 && (
                 <div className="rate-strip">
-                  <span>Auto rates: <b>₱{rateFor({price:Number(form.price)},'day')}</b>/day</span>
-                  <span>· <b>₱{rateFor({price:Number(form.price)},'week')}</b>/week</span>
+                  <span>Auto rates: <b>₱{rateFor({price:Number(form.price)},'week')}</b>/week</span>
                   <span>· <b>₱{rateFor({price:Number(form.price)},'month')}</b>/month</span>
+                  <span className="rate-hint">· longer stays are discounted automatically</span>
                 </div>
               )}
-            </div>
-            <div className="field">
-              <label>Spot type</label>
-              <select value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>
-                <option>Private Driveway</option>
-                <option>Covered Garage</option>
-                <option>Open Lot</option>
-                <option>Gated Lot</option>
-                <option>Street Parking</option>
-              </select>
             </div>
             <div className="field">
               <label>Vehicle capacity</label>
@@ -1073,7 +1405,7 @@ function ListSpotView({onPublish}){
           <div className="form-row">
             <div className="field">
               <label>Description</label>
-              <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Tell drivers what makes your spot great…" />
+              <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="What makes this slot good? Distance to the lift, how easy the turn-in is…" />
             </div>
           </div>
           <div className="field" style={{marginBottom:18}}>
@@ -1109,8 +1441,16 @@ function MyBookingsView({bookings, spots, onReview}){
         return (
           <div className="booking-row" key={b.id}>
             <div>
-              <div style={{fontWeight:700}}>{spot ? spot.title : 'Spot removed'}</div>
-              <div className="muted" style={{fontSize:13}}>{b.date} · {b.start}–{b.end} · ₱{b.total.toFixed(0)} total</div>
+              <div style={{fontWeight:700}}>{spot ? spot.title : 'Slot removed'}</div>
+              <div className="muted" style={{fontSize:13}}>
+                {b.date}{b.endsOn?` → ${b.endsOn}`:''} · {b.units} {planByKey(b.plan).unit}{b.units>1?'s':''} · ₱{b.total.toFixed(0)} total
+              </div>
+              {spot && <div className="muted" style={{fontSize:12}}>{slotAddress(spot)}</div>}
+              {b.payout && (
+                <div className="muted" style={{fontSize:11.5}}>
+                  Paid to {b.payout.accountName} · {walletLabel(b.payout.provider)} {b.payout.masked}
+                </div>
+              )}
               <div className="muted" style={{fontSize:12}}>Ref: {b.ref}</div>
             </div>
             <div style={{display:'flex',gap:10,alignItems:'center'}}>
@@ -1152,7 +1492,7 @@ function ReviewModal({spot, onClose, onSubmit}){
           </div>
           <div className="field" style={{marginBottom:16}}>
             <label>Comment</label>
-            <textarea value={comment} onChange={e=>setComment(e.target.value)} placeholder="How was the spot?" />
+            <textarea value={comment} onChange={e=>setComment(e.target.value)} placeholder="How was the slot?" />
           </div>
           <button className="btn-primary" onClick={()=>{
             onSubmit(spot.id, {id:uid('r'), author:name||'Anonymous Driver', rating, comment: comment||'No comment provided.', date:'Just now'});
@@ -1169,35 +1509,26 @@ function ReviewModal({spot, onClose, onSubmit}){
 function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerify}){
   const [step,setStep] = useState(1); // 1 details, 2 payment, 3 success
   const [date,setDate] = useState('');
-  const [start,setStart] = useState('10:00');
-  const [end,setEnd] = useState('12:00');
   const [payMethod,setPayMethod] = useState('gcash');
   const [processing,setProcessing] = useState(false);
   const [ref,setRef] = useState('');
   const [payError,setPayError] = useState('');
 
-  const [planKey,setPlanKey] = useState('hour');
+  const [planKey,setPlanKey] = useState(DEFAULT_PLAN);
   const [units,setUnits] = useState(1);
   const plan = planByKey(planKey);
 
-  const hours = useMemo(()=>{
-    const [sh,sm] = start.split(':').map(Number);
-    const [eh,em] = end.split(':').map(Number);
-    let diff = (eh*60+em) - (sh*60+sm);
-    if(diff<=0) diff = 0;
-    return diff/60;
-  },[start,end]);
-
-  const qty = planKey==='hour' ? hours : units;
+  /* Every plan books whole days now, so quantity is simply the unit count. */
+  const qty = units;
   const unitRate = rateFor(spot, planKey);
   const subtotal = qty * unitRate;
-  const fee = subtotal * 0.1;
-  const total = subtotal + fee;
-  const valid = date && qty>0;
+  /* No booking commission. ParkKo earns from the owner's ₱500/month plan, so
+     the booker pays exactly the slot rate — nothing is added at checkout. */
+  const total = subtotal;
+  const valid = !!date && qty>0;
 
-  /* Longer plans book whole days, so the hour pickers only apply to hourly. */
   const endsOn = useMemo(()=>{
-    if(planKey==='hour' || !date) return '';
+    if(!date) return '';
     const days = {day:1, week:7, month:30}[planKey] * units;
     const d = new Date(date+'T00:00:00');
     d.setDate(d.getDate() + days);
@@ -1211,8 +1542,8 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
     setProcessing(false);
     setStep(3);
     onConfirm({
-      id:uid('b'), spotId:spot.id, date, start, end, total, ref:bookingRef, method:payMethod,
-      plan:planKey, units:qty, endsOn,
+      id:uid('b'), spotId:spot.id, date, endsOn, total, ref:bookingRef, method:payMethod,
+      plan:planKey, units:qty, payout:spot.payout || null,
     });
   }
 
@@ -1270,14 +1601,14 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
             <React.Fragment>
               <h2>Book: {spot.title}</h2>
               {profile && profile.verified ? (
-                <div className="verify-banner ok">✓ Verified booker — no documents needed. The host will see your verified badge.</div>
+                <div className="verify-banner ok">✓ Verified booker — no documents needed. The owner will see your verified badge.</div>
               ) : (
                 <div className="verify-banner warn">
-                  📄 This host may ask for documents (license, OR/CR, ID, vehicle photo).
+                  📄 This owner may ask for documents (license, OR/CR, ID, vehicle photo).
                   {' '}<button type="button" className="link-btn" onClick={onRequestVerify}>Verify once</button> to skip this on every booking.
                 </div>
               )}
-              <p className="muted">₱{spot.price}/hour · {spot.area}</p>
+              <p className="muted">₱{spot.price}/day · {slotAddress(spot)}</p>
 
               <div className="plan-tabs">
                 {RATE_PLANS.map(p=>{
@@ -1296,50 +1627,41 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
 
               <div className="form-row" style={{marginTop:14}}>
                 <div className="field">
-                  <label>{planKey==='hour' ? 'Date' : 'Start date'}</label>
+                  <label>Start date</label>
                   <input type="date" value={date} onChange={e=>setDate(e.target.value)} />
                 </div>
-                {planKey!=='hour' && (
-                  <div className="field">
-                    <label>Number of {plan.unit}s</label>
-                    <input type="number" min="1" max="12" value={units}
-                      onChange={e=>setUnits(Math.max(1, Number(e.target.value)||1))} />
-                  </div>
-                )}
+                <div className="field">
+                  <label>Number of {plan.unit}s</label>
+                  <input type="number" min="1" max="12" value={units}
+                    onChange={e=>setUnits(Math.max(1, Number(e.target.value)||1))} />
+                </div>
               </div>
-              {planKey!=='hour' && endsOn && (
+              {endsOn && (
                 <p className="muted" style={{fontSize:12,marginTop:-4}}>
                   📅 {units} {plan.unit}{units>1?'s':''} · ends {endsOn}
                 </p>
               )}
-              {planKey==='hour' && (
-              <div className="form-row">
-                <div className="field">
-                  <label>Start time</label>
-                  <input type="time" value={start} onChange={e=>setStart(e.target.value)} />
-                </div>
-                <div className="field">
-                  <label>End time</label>
-                  <input type="time" value={end} onChange={e=>setEnd(e.target.value)} />
-                </div>
-              </div>
-              )}
               <div className="price-card" style={{position:'static',marginTop:6}}>
                 <div className="price-row">
-                  <span>{planKey==='hour' ? `${hours>0?hours.toFixed(1):'0'} hour(s) × ₱${unitRate}` : `${units} ${plan.unit}${units>1?'s':''} × ₱${unitRate}`}</span>
+                  <span>{units} {plan.unit}{units>1?'s':''} × ₱{unitRate}</span>
                   <span>₱{subtotal.toFixed(0)}</span>
                 </div>
-                {planKey!=='hour' && savingsPct(spot,planKey)>0 && (
+                {savingsPct(spot,planKey)>0 && (
                   <div className="price-row" style={{color:'#15803d'}}>
                     <span>{plan.label} discount</span>
                     <span>−{savingsPct(spot,planKey)}%</span>
                   </div>
                 )}
-                <div className="price-row"><span>ParkKo service fee (10%)</span><span>₱{fee.toFixed(0)}</span></div>
+                <div className="price-row" style={{color:'#15803d'}}><span>Booking fee</span><span>None</span></div>
                 <div className="price-row total"><span>Total</span><span>₱{total.toFixed(0)}</span></div>
               </div>
+              <p className="muted" style={{fontSize:11.5,marginTop:8,lineHeight:1.5}}>
+                ⏱ {OVERSTAY.graceMinutes}-minute grace period after your booking ends.
+                Past that, an overstay charge of ₱{overstayFeeFor(spot,1)}/hour applies and
+                the owner and next booker are notified. You can extend anytime in the app.
+              </p>
               {!valid && <p style={{color:'var(--danger)',fontSize:12,marginTop:8}}>
-                {planKey==='hour' ? 'Pick a date and make sure end time is after start time.' : 'Pick a start date to continue.'}
+                Pick a start date to continue.
               </p>}
               <button className="btn-primary" style={{marginTop:16,width:'100%'}} disabled={!valid} onClick={goPay}>Continue to payment</button>
             </React.Fragment>
@@ -1348,6 +1670,16 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
             <React.Fragment>
               <h2>Payment</h2>
               <p className="muted">Total due: <strong>₱{total.toFixed(0)}</strong></p>
+              {spot.payout && (
+                <div className="payout-note">
+                  <div style={{fontWeight:800,marginBottom:2}}>Paid directly to the slot owner</div>
+                  {walletLabel(spot.payout.provider)} · {spot.payout.accountName} · {spot.payout.masked}
+                  <div className="muted" style={{fontSize:11.5,marginTop:4}}>
+                    ParkKo does not hold your payment and takes no booking fee.
+                    You'll get a receipt with this reference.
+                  </div>
+                </div>
+              )}
               <div className="checkrow" style={{margin:'14px 0'}}>
                 <label className="checkitem">
                   <input type="radio" name="pay" checked={payMethod==='gcash'} onChange={()=>setPayMethod('gcash')} /> 📱 GCash
@@ -1356,7 +1688,7 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
                   <input type="radio" name="pay" checked={payMethod==='card'} onChange={()=>setPayMethod('card')} /> 💳 Debit / Credit Card
                 </label>
                 <label className="checkitem">
-                  <input type="radio" name="pay" checked={payMethod==='cash'} onChange={()=>setPayMethod('cash')} /> 💵 Pay host on arrival
+                  <input type="radio" name="pay" checked={payMethod==='cash'} onChange={()=>setPayMethod('cash')} /> 💵 Pay the owner on arrival
                 </label>
               </div>
               {payMethod==='card' && (
@@ -1386,14 +1718,52 @@ function BookingModal({spot, profile, onClose, onConfirm, onDone, onRequestVerif
           {step===3 && (
             <React.Fragment>
               <h2>🎉 Booking confirmed!</h2>
-              <div className="success-box">
-                <p style={{margin:0,fontWeight:700}}>Reference: {ref}</p>
-                <p style={{margin:'6px 0 0'}}>{spot.title}</p>
-                <p style={{margin:'2px 0 0'}} className="muted">
-                  {planKey==='hour' ? `${date} · ${start}–${end}` : `${date} → ${endsOn} · ${units} ${plan.unit}${units>1?'s':''}`}
-                  {' · '}₱{total.toFixed(0)} paid via {payMethod==='gcash'?'GCash':payMethod==='card'?'Card':'Pay on arrival'}
+
+              {/* Official receipt. The booker paid the owner directly, so the
+                  receipt names that wallet — ParkKo only witnesses it. */}
+              <div className="receipt" id="parkko-receipt">
+                <div className="receipt-head">
+                  <div>
+                    <div className="receipt-brand">🅿️ ParkKo</div>
+                    <div className="receipt-sub">{COMPLEX.name}</div>
+                  </div>
+                  <div className="receipt-stamp">PAID</div>
+                </div>
+
+                <div className="receipt-ref">
+                  <span className="muted">Reference</span>
+                  <b>{ref}</b>
+                </div>
+
+                <div className="receipt-rows">
+                  <div className="receipt-row"><span>Slot</span><span>{spot.title}</span></div>
+                  <div className="receipt-row"><span>Location</span><span>{slotAddress(spot)}</span></div>
+                  <div className="receipt-row"><span>Period</span><span>{date} → {endsOn}</span></div>
+                  <div className="receipt-row"><span>Term</span><span>{units} {plan.unit}{units>1?'s':''} × ₱{unitRate}</span></div>
+                  <div className="receipt-row"><span>Method</span><span>{payMethod==='gcash'?'GCash':payMethod==='card'?'Card':'Cash on arrival'}</span></div>
+                  {spot.payout && (
+                    <div className="receipt-row">
+                      <span>Paid to</span>
+                      <span>{spot.payout.accountName} · {walletLabel(spot.payout.provider)} {spot.payout.masked}</span>
+                    </div>
+                  )}
+                  <div className="receipt-row"><span>ParkKo booking fee</span><span>₱0</span></div>
+                </div>
+
+                <div className="receipt-total">
+                  <span>Total paid</span><span>₱{total.toFixed(0)}</span>
+                </div>
+
+                <p className="receipt-foot">
+                  Payment was made directly to the slot owner's registered wallet.
+                  ParkKo is not a party to the transaction and holds no funds.
+                  Show this reference at the guard post.
                 </p>
               </div>
+
+              <button className="btn-secondary" style={{marginTop:12,width:'100%'}} onClick={()=>window.print()}>
+                🧾 Print / save receipt
+              </button>
               <a className="directions-link" href={gmapsDirections(spot.lat,spot.lng)} target="_blank" rel="noopener">🧭 Get Directions in Google Maps</a>
               <button className="btn-primary" style={{marginTop:14,width:'100%'}} onClick={onDone}>Done</button>
             </React.Fragment>
@@ -1444,7 +1814,7 @@ function SpotDetailModal({spot, onClose, onBook, onMessage}){
 
           <div className="detail-grid">
             <div>
-              <div className="section-title">About this spot</div>
+              <div className="section-title">About this slot</div>
               <p>{spot.description}</p>
 
               <div className="section-title">Amenities</div>
@@ -1469,10 +1839,18 @@ function SpotDetailModal({spot, onClose, onBook, onMessage}){
 
             <div>
               <div className="price-card">
-                <div className="big">₱{spot.price}<span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}> /hour</span></div>
-                <p className="muted" style={{fontSize:13}}>{spot.type} · {spot.capacity}</p>
-                <button className="btn-primary" style={{width:'100%',marginTop:10}} onClick={()=>onBook(spot)}>Book this spot</button>
-                <button className="btn-secondary" style={{width:'100%',marginTop:8}} onClick={()=>onMessage(spot)}>💬 Message host</button>
+                <div className="big">₱{rateFor(spot,'month')}<span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}> /month</span></div>
+                <p className="muted" style={{fontSize:12.5,marginTop:2}}>
+                  ₱{spot.price}/day · ₱{rateFor(spot,'week')}/week
+                </p>
+                <p className="muted" style={{fontSize:13}}>{slotAddress(spot)} · {spot.capacity}</p>
+                {spot.payout && (
+                  <p className="muted" style={{fontSize:11.5,marginTop:4}}>
+                    💰 You pay the owner directly ({walletLabel(spot.payout.provider)}) · no booking fee
+                  </p>
+                )}
+                <button className="btn-primary" style={{width:'100%',marginTop:10}} onClick={()=>onBook(spot)}>Book this slot</button>
+                <button className="btn-secondary" style={{width:'100%',marginTop:8}} onClick={()=>onMessage(spot)}>💬 Message the owner</button>
                 <a className="directions-link" href={gmapsDirections(spot.lat,spot.lng)} target="_blank" rel="noopener">🧭 Get Directions in Google Maps</a>
                 <a className="directions-link" style={{marginTop:8}} href={gmapsView(spot.lat,spot.lng)} target="_blank" rel="noopener">🗺️ View on Google Maps</a>
               </div>
@@ -1488,6 +1866,426 @@ function SpotDetailModal({spot, onClose, onBook, onMessage}){
 
 /* Booker uploads documents once to become verified. All four docs + plate
    number are required to flip verified true. */
+const AUDIENCE_LABEL = {
+  owner:    {icon:'🏢', who:'As the slot owner'},
+  occupant: {icon:'🚗', who:'Your booking'},
+  next:     {icon:'⏳', who:'Your upcoming booking'},
+};
+
+/* Overstay alerts, newest first. Shown wherever the affected party will
+   actually look: on Browse and on My Bookings. */
+function NoticeBanner({notices, onDismiss, onExtend}){
+  if(!notices.length) return null;
+  return (
+    <div className="notice-stack">
+      {notices.map(n=>{
+        const meta = AUDIENCE_LABEL[n.audience] || {icon:'🔔', who:''};
+        return (
+          <div key={n.id} className={"notice "+(n.severity==='urgent'?'urgent':'warn')}>
+            <span className="notice-ico">{meta.icon}</span>
+            <div className="notice-body">
+              <div className="notice-title">{n.title}</div>
+              <p>{n.body}</p>
+              <div className="notice-meta">{meta.who} · Ref {n.ref}</div>
+              {n.audience==='occupant' && onExtend && (
+                <button className="notice-action" onClick={()=>onExtend(n)}>Extend my booking</button>
+              )}
+            </div>
+            <button className="notice-x" onClick={()=>onDismiss(n.id)} aria-label="Dismiss">✕</button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Co-host management. The owner delegates work, never the money. */
+function CoHostModal({profile, onClose, onSaved}){
+  const [cohosts,setCohosts] = useState(profile.cohosts||[]);
+  const [adding,setAdding] = useState((profile.cohosts||[]).length===0);
+  const [name,setName] = useState('');
+  const [contact,setContact] = useState('');
+  const [perms,setPerms] = useState(['messages','overstay']);
+  const [error,setError] = useState('');
+
+  function togglePerm(k){
+    setPerms(p=> p.includes(k) ? p.filter(x=>x!==k) : [...p,k]);
+  }
+
+  function persist(next){
+    const updated = {...profile, cohosts:next};
+    const saved = saveProfile(updated);
+    if(!saved.ok){ setError(saved.error); return false; }
+    setCohosts(next);
+    onSaved(updated);
+    return true;
+  }
+
+  function addCohost(){
+    if(!name.trim() || !contact.trim()){ setError('Name and contact are both required.'); return; }
+    if(!perms.length){ setError('Give your co-host at least one permission.'); return; }
+    setError('');
+    const entry = {
+      id: uid('ch'), name:name.trim(), contact:contact.trim(),
+      perms:[...perms], status:'invited', since:'2026',
+    };
+    if(persist([...cohosts, entry])){
+      setName(''); setContact(''); setPerms(['messages','overstay']); setAdding(false);
+    }
+  }
+
+  function removeCohost(id){
+    persist(cohosts.filter(c=>c.id!==id));
+  }
+
+  function togglePermFor(id, k){
+    persist(cohosts.map(c=>{
+      if(c.id!==id) return c;
+      const has = c.perms.includes(k);
+      // Never strip the last permission — a co-host with none is just noise.
+      if(has && c.perms.length===1) return c;
+      return {...c, perms: has ? c.perms.filter(x=>x!==k) : [...c.perms, k]};
+    }));
+  }
+
+  return (
+    <div className="overlay" onClick={e=>{if(e.target===e.currentTarget) onClose();}}>
+      <div className="modal" style={{maxWidth:560}}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-body">
+          <h2>Co-hosts</h2>
+          <p className="muted">
+            Away a lot? Let someone you trust — a spouse, a sibling, a neighbour —
+            run your slot day to day. They handle bookers and overstays;
+            <b> the money always stays with you.</b>
+          </p>
+
+          {cohosts.length>0 && (
+            <div className="cohost-list">
+              {cohosts.map(c=>(
+                <div className="cohost-card" key={c.id}>
+                  <div className="cohost-head">
+                    <div>
+                      <div className="cohost-name">
+                        {c.name}
+                        <span className={"cohost-status "+(c.status==='active'?'active':'')}>
+                          {c.status==='active' ? 'Active' : 'Invited'}
+                        </span>
+                      </div>
+                      <div className="muted" style={{fontSize:11.5}}>{c.contact}</div>
+                    </div>
+                    <button className="cohost-remove" onClick={()=>removeCohost(c.id)}>Remove</button>
+                  </div>
+                  <div className="filter-chips" style={{marginTop:9}}>
+                    {COHOST_PERMISSIONS.map(p=>(
+                      <button key={p.key} type="button" title={p.hint}
+                        className={"fchip small"+(c.perms.includes(p.key)?' active':'')}
+                        onClick={()=>togglePermFor(c.id,p.key)}>
+                        {c.perms.includes(p.key)?'✓ ':''}{p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {adding ? (
+            <div className="cohost-form">
+              <div className="section-title">Invite a co-host</div>
+              <div className="form-row">
+                <div className="field">
+                  <label>Name</label>
+                  <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Ana Suarez" />
+                </div>
+                <div className="field">
+                  <label>Mobile or email</label>
+                  <input value={contact} onChange={e=>setContact(e.target.value)} placeholder="09XX XXX XXXX" />
+                </div>
+              </div>
+              <div className="field" style={{marginTop:10}}>
+                <label>What can they do?</label>
+                <div className="filter-chips">
+                  {COHOST_PERMISSIONS.map(p=>(
+                    <button key={p.key} type="button" title={p.hint}
+                      className={"fchip"+(perms.includes(p.key)?' active':'')}
+                      onClick={()=>togglePerm(p.key)}>
+                      {perms.includes(p.key)?'✓ ':''}{p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="cohost-never">
+                <b>A co-host can never:</b>
+                <ul>{COHOST_NEVER.map(x=><li key={x}>{x}</li>)}</ul>
+              </div>
+
+              {error && <p style={{color:'var(--danger)',fontSize:13,marginTop:8}}>{error}</p>}
+              <div style={{display:'flex',gap:10,marginTop:12}}>
+                {cohosts.length>0 && <button className="btn-secondary" onClick={()=>{setAdding(false);setError('');}}>Cancel</button>}
+                <button className="btn-primary" style={{flex:1}} onClick={addCohost}>Send invite</button>
+              </div>
+            </div>
+          ) : (
+            <button className="btn-secondary" style={{marginTop:14,width:'100%'}} onClick={()=>setAdding(true)}>
+              + Invite another co-host
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Where the owner gets paid. Bookers pay this wallet directly — ParkKo is
+   never in the middle of the rent. */
+function WalletModal({profile, onClose, onSaved}){
+  const w = profile.wallet || {provider:'gcash', number:'', accountName:''};
+  const [provider,setProvider] = useState(w.provider||'gcash');
+  const [number,setNumber] = useState(w.number||'');
+  const [accountName,setAccountName] = useState(w.accountName||'');
+  const [bankName,setBankName] = useState(w.bankName||'');
+  const [error,setError] = useState('');
+
+  const meta = WALLET_PROVIDERS.find(p=>p.key===provider) || WALLET_PROVIDERS[0];
+  const complete = number.trim() && accountName.trim() && (provider!=='bank' || bankName.trim());
+
+  function submit(){
+    if(!complete){ setError('Please complete every field.'); return; }
+    const next = {
+      ...profile,
+      wallet:{
+        provider,
+        number: number.trim(),
+        accountName: accountName.trim(),
+        ...(provider==='bank' ? {bankName: bankName.trim()} : {}),
+      },
+    };
+    const saved = saveProfile(next);
+    if(!saved.ok){ setError(saved.error); return; }
+    onSaved(next);
+  }
+
+  return (
+    <div className="overlay" onClick={e=>{if(e.target===e.currentTarget) onClose();}}>
+      <div className="modal" style={{maxWidth:480}}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-body">
+          <h2>Where should you get paid?</h2>
+          <p className="muted">
+            Bookers pay you <b>directly</b> — ParkKo never holds your rent and takes
+            no cut of it. Register the wallet the money should land in.
+          </p>
+
+          <div className="section-title" style={{marginTop:14}}>Payout method</div>
+          <div className="filter-chips">
+            {WALLET_PROVIDERS.map(p=>(
+              <button key={p.key} type="button"
+                className={"fchip"+(provider===p.key?' active':'')}
+                onClick={()=>setProvider(p.key)}>{p.icon} {p.label}</button>
+            ))}
+          </div>
+
+          {provider==='bank' && (
+            <div className="form-row" style={{marginTop:12}}>
+              <div className="field">
+                <label>Bank name</label>
+                <input value={bankName} onChange={e=>setBankName(e.target.value)} placeholder="e.g. BPI, BDO, Landbank" />
+              </div>
+            </div>
+          )}
+
+          <div className="form-row" style={{marginTop:12}}>
+            <div className="field">
+              <label>{provider==='bank' ? 'Account number' : `${meta.label} number`}</label>
+              <input value={number} onChange={e=>setNumber(e.target.value)} placeholder={meta.hint} />
+            </div>
+            <div className="field">
+              <label>Account name</label>
+              <input value={accountName} onChange={e=>setAccountName(e.target.value)} placeholder="Juan dela Cruz" />
+            </div>
+          </div>
+
+          <p className="muted" style={{fontSize:12,marginTop:12}}>
+            🔒 Bookers only ever see the last four digits and the account name —
+            enough to confirm they are paying the right person, and nothing more.
+          </p>
+          {error && <p style={{color:'var(--danger)',fontSize:13,marginTop:6}}>{error}</p>}
+          <button className="btn-primary" style={{marginTop:12,width:'100%'}} disabled={!complete} onClick={submit}>
+            Save payout wallet
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ₱500/month owner subscription — ParkKo's revenue line. Gated behind
+   residency: there is no point selling a plan to someone who cannot list. */
+function SubscribeModal({profile, onClose, onSubscribed}){
+  const [method,setMethod] = useState('gcash');
+  const [processing,setProcessing] = useState(false);
+  const [error,setError] = useState('');
+
+  async function subscribe(){
+    setError('');
+    setProcessing(true);
+
+    if(PAYMENTS_LIVE && method==='gcash'){
+      try {
+        const src = await PayMongo.createSource({
+          amount: SUBSCRIPTION.price,
+          type: 'gcash',
+          description: `ParkKo ${SUBSCRIPTION.label} · monthly`,
+        });
+        if(src && src.checkoutUrl){ window.location.href = src.checkoutUrl; return; }
+      } catch(err){
+        setError(err.message || 'Could not start payment. You can try card instead.');
+        setProcessing(false);
+        return;
+      }
+    }
+
+    // Demo fallback: mark the plan active locally.
+    const today = new Date();
+    const renews = new Date(today); renews.setMonth(renews.getMonth()+1);
+    const next = {
+      ...profile,
+      subscribed:true,
+      subSince: today.toISOString().slice(0,10),
+      subRenews: renews.toISOString().slice(0,10),
+    };
+    const saved = saveProfile(next);
+    if(!saved.ok){ setError(saved.error); setProcessing(false); return; }
+    setProcessing(false);
+    onSubscribed(next);
+  }
+
+  return (
+    <div className="overlay" onClick={e=>{if(e.target===e.currentTarget) onClose();}}>
+      <div className="modal" style={{maxWidth:480}}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-body">
+          <h2>{SUBSCRIPTION.label}</h2>
+          <div className="sub-price">
+            ₱{SUBSCRIPTION.price}<span>/{SUBSCRIPTION.period}</span>
+          </div>
+          <p className="muted" style={{marginTop:2}}>
+            Cancel anytime. Your listings stay live while the plan is active.
+          </p>
+
+          <ul className="sub-perks">
+            {SUBSCRIPTION.perks.map(p=><li key={p}>✓ {p}</li>)}
+          </ul>
+
+          <div className="sub-math">
+            💡 A mid-priced slot at ₱165/day covers the ₱500 in about three days.
+            The rest of the month is yours.
+          </div>
+
+          <div className="section-title" style={{marginTop:14}}>Payment method</div>
+          <label className="pay-opt">
+            <input type="radio" name="submethod" checked={method==='gcash'} onChange={()=>setMethod('gcash')} /> 📱 GCash
+          </label>
+          <label className="pay-opt">
+            <input type="radio" name="submethod" checked={method==='card'} onChange={()=>setMethod('card')} /> 💳 Card
+          </label>
+
+          {error && <p style={{color:'var(--danger)',fontSize:13,marginTop:10}}>{error}</p>}
+          <button className="btn-primary" style={{marginTop:14,width:'100%'}} disabled={processing} onClick={subscribe}>
+            {processing ? 'Processing…' : `Subscribe · ₱${SUBSCRIPTION.price}/month`}
+          </button>
+          <p className="muted" style={{fontSize:11,marginTop:10}}>
+            🔒 Demo — test-mode payment. No real charge is made.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Residency check — the gate that makes listings exclusive to this complex.
+   Owners only; visitors never see this. */
+function ResidencyModal({profile, onClose, onVerified}){
+  const [building,setBuilding] = useState(profile.building || COMPLEX.buildings[0]);
+  const [unit,setUnit] = useState(profile.unit||'');
+  const [name,setName] = useState(profile.name||'');
+  const [docs,setDocs] = useState(profile.ownerDocs||{});
+  const [error,setError] = useState('');
+
+  const allDocsIn = OWNER_DOC_TYPES.every(d=>docs[d.key]);
+  const complete = allDocsIn && unit.trim() && name.trim();
+
+  function submit(){
+    if(!complete){ setError('Please complete every field and upload all three documents.'); return; }
+    const next = {
+      ...profile,
+      name: name.trim(),
+      resident: true,
+      building,
+      unit: unit.trim().toUpperCase(),
+      ownerDocs: docs,
+    };
+    const saved = saveProfile(next);
+    if(!saved.ok){ setError(saved.error); return; }
+    onVerified(next);
+  }
+
+  return (
+    <div className="overlay" onClick={e=>{if(e.target===e.currentTarget) onClose();}}>
+      <div className="modal" style={{maxWidth:540}}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-body">
+          <h2>Verify you live here</h2>
+          <p className="muted">
+            ParkKo only carries slots inside {COMPLEX.name}. To list a slot you
+            need to show it is yours to rent out — which tower, which unit, and a
+            document tying you to it. This is a one-time check.
+          </p>
+
+          <div className="form-row" style={{marginTop:14}}>
+            <div className="field">
+              <label>Building</label>
+              <select value={building} onChange={e=>setBuilding(e.target.value)}>
+                {COMPLEX.buildings.map(b=><option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Unit number</label>
+              <input value={unit} onChange={e=>setUnit(e.target.value)} placeholder="e.g. 12F" />
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="field">
+              <label>Name on the title / lease</label>
+              <input value={name} onChange={e=>setName(e.target.value)} placeholder="Juan dela Cruz" />
+            </div>
+          </div>
+
+          <div className="section-title" style={{marginTop:12}}>Proof of ownership</div>
+          <div className="doc-list">
+            {OWNER_DOC_TYPES.map(dt=>(
+              <DocUploader key={dt.key} docType={dt} value={docs[dt.key]}
+                onChange={src=>setDocs(d=>({...d,[dt.key]:src}))} />
+            ))}
+          </div>
+
+          <p className="muted" style={{fontSize:12,marginTop:10}}>
+            🔒 Demo only — documents stay in your browser and are never uploaded.
+            In production the building administrator reviews these against the
+            master unit list before a listing goes live.
+          </p>
+          {error && <p style={{color:'var(--danger)',fontSize:13,marginTop:6}}>{error}</p>}
+          <button className="btn-primary" style={{marginTop:12,width:'100%'}} disabled={!complete} onClick={submit}>
+            {complete ? 'Submit for verification' : `Complete all items (${OWNER_DOC_TYPES.filter(d=>docs[d.key]).length}/${OWNER_DOC_TYPES.length} docs)`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VerifyModal({profile, onClose, onVerified}){
   const [name,setName] = useState(profile.name||'');
   const [plate,setPlate] = useState(profile.plate||'');
@@ -1567,7 +2365,7 @@ function ChatModal({spot, profile, thread, onClose, onSend, onRequestVerify}){
           <div className="chat-host-avatar">{spot.host.initial}</div>
           <div>
             <div style={{fontWeight:800}}>{spot.host.name}</div>
-            <div className="muted" style={{fontSize:12}}>Host · {spot.title}</div>
+            <div className="muted" style={{fontSize:12}}>Owner · {spot.title}</div>
           </div>
         </div>
 
@@ -1648,14 +2446,20 @@ function AuthModal({onClose, onAuthed}){
                 <button type="button" className={"role-opt"+(role==='driver'?' active':'')} onClick={()=>setRole('driver')}>
                   <span className="role-emoji">🚗</span>
                   <span className="role-name">Find parking</span>
-                  <span className="role-sub">Driver</span>
+                  <span className="role-sub">Visitor or resident</span>
                 </button>
                 <button type="button" className={"role-opt"+(role==='host'?' active':'')} onClick={()=>setRole('host')}>
-                  <span className="role-emoji">🏠</span>
-                  <span className="role-name">Rent out a spot</span>
-                  <span className="role-sub">Host</span>
+                  <span className="role-emoji">🏢</span>
+                  <span className="role-name">Rent out my slot</span>
+                  <span className="role-sub">Unit owner</span>
                 </button>
               </div>
+              {role==='host' && (
+                <p className="muted" style={{fontSize:12,marginTop:8}}>
+                  You'll verify your unit before your first listing goes live — ParkKo
+                  only carries slots inside {COMPLEX.name}.
+                </p>
+              )}
               <div className="field" style={{marginTop:12}}>
                 <label>Full name</label>
                 <input value={name} onChange={e=>setName(e.target.value)} placeholder="Juan dela Cruz" />
@@ -1689,52 +2493,77 @@ function AboutView({onBrowse, onList}){
   return (
     <div className="about">
       <section className="about-hero">
-        <span className="about-eyebrow">Iloilo City · parking, solved together</span>
-        <h1>Every empty driveway is a parking spot waiting to happen.</h1>
+        <span className="about-eyebrow">{COMPLEX.name} · Buildings A, B, C & D</span>
+        <h1>The parking you need is already here. It’s just sitting empty.</h1>
         <p className="about-lead">
-          Iloilo is growing fast — malls, offices, festivals, new business districts.
-          The cars came faster than the parking. ParkKo turns the space that already
-          exists into the parking the city needs.
+          On any weekday a good share of the slots under these four towers are
+          empty — owners at the office, on assignment, or abroad. Meanwhile
+          guests circle the podium and neighbours with two cars have nowhere to
+          put the second. ParkKo connects the two, inside this complex only.
         </p>
       </section>
 
       <section className="about-problem">
-        <h2>The problem every Ilonggo driver knows</h2>
+        <h2>Two problems, one building</h2>
         <div className="about-cards">
           <div className="about-card">
+            <span className="about-ico">💸</span>
+            <h3>An asset earning nothing</h3>
+            <p>You paid for that slot. If your car is not in it — you travel, you work abroad, you sold the second car — it earns you nothing while you keep paying dues on it.</p>
+          </div>
+          <div className="about-card">
             <span className="about-ico">🔄</span>
-            <h3>Circling for a slot</h3>
-            <p>You arrive in Jaro, Mandurriao, or downtown and spend 20 minutes hunting for a space — burning fuel, time, and patience.</p>
+            <h3>Visitors circling the podium</h3>
+            <p>Guests arrive, find the visitor bays full, and spend fifteen minutes crawling up and down the decks before giving up and parking outside.</p>
           </div>
           <div className="about-card">
-            <span className="about-ico">🚧</span>
-            <h3>Full lots, no warning</h3>
-            <p>The mall lot is packed on a weekend and you only find out after you’ve driven all the way in and queued at the gate.</p>
-          </div>
-          <div className="about-card">
-            <span className="about-ico">🏚️</span>
-            <h3>Empty space going to waste</h3>
-            <p>Meanwhile, thousands of driveways, garages, and lots sit empty all day while their owners are at work.</p>
+            <span className="about-ico">🚗</span>
+            <h3>Neighbours with nowhere to park</h3>
+            <p>A household buys a second car and discovers the building has no more slots to sell. The space they need is three floors down, unused.</p>
           </div>
         </div>
       </section>
 
       <section className="about-solution">
-        <h2>How ParkKo helps</h2>
+        <h2>How ParkKo works here</h2>
         <div className="about-steps">
-          <div className="about-step"><span className="about-num">1</span><div><h4>Hosts list their space</h4><p>Anyone with a driveway, garage, or lot lists it in a minute and earns by the hour, day, week, or month.</p></div></div>
-          <div className="about-step"><span className="about-num">2</span><div><h4>Drivers find & book nearby</h4><p>Search by mall, church, campus, or barangay. See photos, prices, and reviews. Book and get directions.</p></div></div>
-          <div className="about-step"><span className="about-num">3</span><div><h4>Free lots, reported live</h4><p>The map also shows mall and public parking — and drivers report how full each one is, Waze-style, so you know before you go.</p></div></div>
-          <div className="about-step"><span className="about-num">4</span><div><h4>Trust built in</h4><p>Verified profiles, host chat, and document checks make renting a stranger’s space feel safe on both sides.</p></div></div>
+          <div className="about-step"><span className="about-num">1</span><div><h4>Owners verify their unit</h4><p>One-time check — tower, unit number, and proof the slot is yours. This is what keeps ParkKo exclusive to this complex: nobody outside it can list.</p></div></div>
+          <div className="about-step"><span className="about-num">2</span><div><h4>Subscribe, then list</h4><p>Owners pay ₱{SUBSCRIPTION.price} a month to keep listings live — unlimited slots, and ParkKo takes no cut of your rent. Set a daily rate; weekly and monthly prices are worked out for you at a discount.</p></div></div>
+          <div className="about-step"><span className="about-num">3</span><div><h4>Visitors and neighbours book it</h4><p>No verification needed to book — filter by tower, level, and covered or open, then reserve. Guests get the exact slot number, not a vague direction.</p></div></div>
+          <div className="about-step"><span className="about-num">4</span><div><h4>Visitor bays, reported live</h4><p>The free shared bays are on the map too, with residents reporting how full each one is — so a guest knows before driving in.</p></div></div>
+        </div>
+      </section>
+
+      <section className="about-pricing">
+        <h2>What it costs</h2>
+        <div className="about-cards">
+          <div className="about-card price-card-about">
+            <span className="about-ico">🏢</span>
+            <h3>Owners · ₱{SUBSCRIPTION.price}/month</h3>
+            <p>
+              A flat subscription to keep your listings live. Unlimited slots, and
+              ParkKo takes <b>no commission</b> — every peso a booker pays is yours.
+              Around three days of rental covers the fee.
+            </p>
+          </div>
+          <div className="about-card price-card-about">
+            <span className="about-ico">🚗</span>
+            <h3>Visitors &amp; bookers · Free</h3>
+            <p>
+              No subscription, no verification, no booking fee. You pay the slot's
+              rate and nothing on top. Finding parking here should never cost you
+              anything before you've parked.
+            </p>
+          </div>
         </div>
       </section>
 
       <section className="about-cta">
-        <h2>Iloilo already has enough parking. It’s just locked away.</h2>
-        <p className="muted">ParkKo unlocks it — one driveway, one booking at a time.</p>
+        <h2>Four towers already have enough parking. It’s just locked away.</h2>
+        <p className="muted">ParkKo unlocks it — one slot, one booking at a time.</p>
         <div className="about-cta-btns">
-          <button className="btn-primary" onClick={onBrowse}>Find parking</button>
-          <button className="btn-secondary" onClick={onList}>List your spot</button>
+          <button className="btn-primary" onClick={onBrowse}>Find a slot</button>
+          <button className="btn-secondary" onClick={onList}>Earn from my slot</button>
         </div>
       </section>
     </div>
@@ -1773,6 +2602,11 @@ function App(){
   const [profile,setProfile] = useState(loadProfile);
   const [chatSpotId,setChatSpotId] = useState(null);
   const [showVerify,setShowVerify] = useState(false);
+  const [showResidency,setShowResidency] = useState(false);
+  const [showSubscribe,setShowSubscribe] = useState(false);
+  const [showWallet,setShowWallet] = useState(false);
+  const [notices,setNotices] = useState(loadNotices);
+  const [showCohosts,setShowCohosts] = useState(false);
   const [chats,setChats] = useState(loadChats);
   const [account,setAccount] = useState(null);
   const [showAuth,setShowAuth] = useState(false);
@@ -1792,6 +2626,71 @@ function App(){
     const unsub = Auth.onChange(setAccount);
     return unsub;
   },[]);
+
+  /* Overstay watch. Every booking that runs past its end (plus grace) raises
+     one notice per affected party. `key` carries the booking id and the hour
+     of overstay, so a driver gets an hourly nudge rather than a new alert on
+     every tick — and re-mounting the app never duplicates what it already sent. */
+  useEffect(()=>{
+    function sweep(){
+      const now = new Date();
+      const nowIso = now.toISOString();
+      setNotices(prev=>{
+        const seen = new Set(prev.map(n=>n.key));
+        const fresh = [];
+
+        bookings.forEach(b=>{
+          if(b.endedEarly) return;
+          const state = overstayState(b, now);
+          if(state.status!=='over') return;
+
+          const spot = spots.find(s=>s.id===b.spotId) || null;
+          // Whoever holds the same slot next is the person actually blocked.
+          const nextBooking = bookings
+            .filter(o=> o.spotId===b.spotId && o.id!==b.id && o.date >= b.endsOn)
+            .sort((x,y)=> x.date.localeCompare(y.date))[0] || null;
+
+          buildOverstayNotices(b, spot, state, nextBooking, nowIso)
+            .forEach(n=>{ if(!seen.has(n.key+':'+n.audience)) fresh.push(n); });
+        });
+
+        if(!fresh.length) return prev;
+        // Tag each notice so the dedupe key is per-audience, not per-event.
+        const tagged = fresh.map(n=>({...n, key:n.key+':'+n.audience}));
+        const next = [...tagged, ...prev].slice(0,40);
+        saveNotices(next);
+        return next;
+      });
+    }
+    sweep();
+    const t = setInterval(sweep, 60000);
+    return ()=>clearInterval(t);
+  },[bookings, spots]);
+
+  function dismissNotice(id){
+    setNotices(prev=>{
+      const next = prev.filter(n=>n.id!==id);
+      saveNotices(next);
+      return next;
+    });
+  }
+
+  /* An overstaying driver extends rather than argues — one tap adds a day and
+     clears their alerts. */
+  function extendBooking(notice){
+    setBookings(prev=>prev.map(b=>{
+      if(b.id!==notice.bookingId) return b;
+      const d = new Date(b.endsOn+'T00:00:00');
+      d.setDate(d.getDate()+1);
+      return {...b, endsOn:d.toISOString().slice(0,10), units:(b.units||1)+1};
+    }));
+    setNotices(prev=>{
+      const next = prev.filter(n=>n.bookingId!==notice.bookingId);
+      saveNotices(next);
+      return next;
+    });
+    showToast('📅 Booking extended by one day. The owner has been notified.');
+  }
 
   async function handleLogout(){
     await Auth.logout();
@@ -1822,6 +2721,30 @@ function App(){
     }, 1100);
   }
 
+  function handleResidencyVerified(next){
+    setProfile(next);
+    setShowResidency(false);
+    showToast(`✓ Verified — ${next.unit}, ${next.building}.`);
+    // Verification and subscription are one continuous flow for an owner;
+    // making them hunt for the plan afterwards just loses them.
+    if(!next.subscribed) setShowSubscribe(true);
+  }
+
+  function handleSubscribed(next){
+    setProfile(next);
+    setShowSubscribe(false);
+    showToast(`🔑 ${SUBSCRIPTION.label} active.`);
+    // Last step of owner onboarding: without a wallet there is nowhere for a
+    // booker's payment to land, so ask for it while they are still here.
+    if(!hasWallet(next)) setShowWallet(true);
+  }
+
+  function handleWalletSaved(next){
+    setProfile(next);
+    setShowWallet(false);
+    showToast(`💰 Payout wallet saved — ${walletLabel(next.wallet.provider)} ${maskWallet(next.wallet.number)}.`);
+  }
+
   function handleVerified(next){
     setProfile(next);
     setShowVerify(false);
@@ -1850,7 +2773,7 @@ function App(){
   return (
     <div className="app">
       <div className="navbar">
-        <div className="brand"><span>🅿️ ParkKo</span><span className="dot">Iloilo</span></div>
+        <div className="brand"><span>🅿️ ParkKo</span><span className="dot">Style Residences</span></div>
         <div className="navtabs">
           <button className={"navtab"+(tab==='browse'?' active':'')} onClick={()=>setTab('browse')}>Browse</button>
           <button className={"navtab"+(tab==='map'?' active':'')} onClick={()=>setTab('map')}>Map</button>
@@ -1870,22 +2793,36 @@ function App(){
           ) : (
             <button className="navcta ghost small" onClick={()=>setShowAuth(true)}>Log in / Sign up</button>
           )}
-          {(!account || account.role==='host') &&
-            <button className={"navcta ghost"} onClick={()=>setTab('host')}>List your spot</button>}
+          {/* Always reachable — a resident who signed up as a driver may still
+              own a slot, and the listing view gates on residency anyway. */}
+          <button className={"navcta ghost"} onClick={()=>setTab('host')}>
+            {profile.resident ? 'List my slot' : 'Earn from my slot'}
+          </button>
         </div>
       </div>
 
       <main>
+        {notices.length>0 && (tab==='browse' || tab==='bookings') && (
+          <div className="wrap" style={{paddingBottom:0}}>
+            <NoticeBanner notices={notices} onDismiss={dismissNotice} onExtend={extendBooking} />
+          </div>
+        )}
         {tab==='browse' && <BrowseView spots={spots} onOpen={setSelectedId} savedIds={savedIds} onToggleSave={toggleSave} />}
         {tab==='saved' && <SavedView spots={spots} savedIds={savedIds} onOpen={setSelectedId} onToggleSave={toggleSave} onBrowse={()=>setTab('browse')} />}
         {tab==='about' && <AboutView onBrowse={()=>setTab('browse')} onList={()=>setTab('host')} />}
         {tab==='map' && <MapView spots={spots} onOpen={setSelectedId} />}
-        {tab==='host' && <ListSpotView onPublish={handlePublish} />}
+        {tab==='host' && <ListSpotView onPublish={handlePublish} profile={profile}
+          onRequestResidency={()=>setShowResidency(true)}
+          onRequestSubscribe={()=>setShowSubscribe(true)}
+          onRequestWallet={()=>setShowWallet(true)}
+          onManageCohosts={()=>setShowCohosts(true)} />}
         {tab==='bookings' && <MyBookingsView bookings={bookings} spots={spots} onReview={setReviewSpotId} />}
       </main>
 
       <div className="footer">
-        ParkKo Iloilo — a concept prototype for solving Iloilo City's parking shortage, peer-to-peer, Airbnb-style. Demo data resets on page reload.
+        ParkKo — a concept prototype for solving parking inside {COMPLEX.name},
+        {' '}{COMPLEX.city}. Buildings A, B, C & D only. Slots, owners, and reviews
+        shown here are mock data for demonstration; this is not affiliated with SMDC.
       </div>
 
       {selectedSpot && (
@@ -1914,6 +2851,34 @@ function App(){
           onClose={()=>setChatSpotId(null)}
           onSend={(text)=>handleSendMessage(chatSpot.id, text)}
           onRequestVerify={()=>{ setChatSpotId(null); setShowVerify(true); }}
+        />
+      )}
+      {showCohosts && (
+        <CoHostModal
+          profile={profile}
+          onClose={()=>setShowCohosts(false)}
+          onSaved={setProfile}
+        />
+      )}
+      {showWallet && (
+        <WalletModal
+          profile={profile}
+          onClose={()=>setShowWallet(false)}
+          onSaved={handleWalletSaved}
+        />
+      )}
+      {showSubscribe && (
+        <SubscribeModal
+          profile={profile}
+          onClose={()=>setShowSubscribe(false)}
+          onSubscribed={handleSubscribed}
+        />
+      )}
+      {showResidency && (
+        <ResidencyModal
+          profile={profile}
+          onClose={()=>setShowResidency(false)}
+          onVerified={handleResidencyVerified}
         />
       )}
       {showVerify && (

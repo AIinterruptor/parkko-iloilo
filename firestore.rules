@@ -8,9 +8,28 @@ rules_version = '2';
 // Model: a signed-in user may only create/read/update THEIR OWN user doc.
 // Vacancy reports are world-readable, writable by any signed-in user (one of
 // three valid statuses), and can never be deleted.
+//
+// EXCLUSIVITY (SMDC Style Residences, Buildings A–D):
+// The two sides of this marketplace are deliberately asymmetric.
+//   * BOOKING is open. Visitors are the point — requiring them to prove
+//     residency would defeat the product.
+//   * LISTING is closed. A slot listing must name a building in A–D and
+//     carry a residency flag that ONLY the building administrator can set.
+//     A user cannot self-award residency: the `resident` field is writable
+//     by admins only, which is what stops someone outside the complex from
+//     injecting a listing. Client-side gating is the UX; this is the teeth.
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // The only buildings this app serves.
+    function validBuilding(b) {
+      return b in ['Building A', 'Building B', 'Building C', 'Building D'];
+    }
 
     // --- User profiles: users/{uid} ---
     match /users/{uid} {
@@ -19,15 +38,89 @@ service cloud.firestore {
                     && request.auth.uid == uid
                     && request.resource.data.role in ['host', 'driver']
                     && request.resource.data.email is string
-                    && request.resource.data.name is string;
+                    && request.resource.data.name is string
+                    // Nobody signs up already-verified or already-paid.
+                    // Residency is granted; subscription is purchased.
+                    && request.resource.data.get('resident', false) == false
+                    && request.resource.data.get('subscribed', false) == false;
       allow update: if request.auth != null
                     && request.auth.uid == uid
-                    && request.resource.data.role in ['host', 'driver'];
+                    && request.resource.data.role in ['host', 'driver']
+                    // A user may submit documents and state which unit they
+                    // claim, but may NOT flip their own residency flag...
+                    && request.resource.data.get('resident', false)
+                       == resource.data.get('resident', false)
+                    // ...nor grant themselves a free subscription. That flag
+                    // is set only by the payment webhook (an admin token).
+                    && request.resource.data.get('subscribed', false)
+                       == resource.data.get('subscribed', false);
+      // Only the building admin verifies residency; only the payment webhook
+      // (also an admin token) activates or lapses a subscription.
+      allow update: if isAdmin()
+                    && (request.resource.data.get('resident', false) == false
+                        || validBuilding(request.resource.data.building));
+      allow delete: if false;
+    }
+
+    // --- Slot listings: spots/{spotId} ---
+    // Anyone may browse. Only a verified resident of a valid building, with an
+    // active subscription, may publish — and only in their own name. This is
+    // what keeps the inventory exclusive to the complex.
+    //
+    // PAYOUT PRIVACY: a listing carries only the provider, account name, and
+    // a masked last-four (e.g. "•••• 0142"). The full wallet number NEVER
+    // leaves the owner's own user doc, because listings are world-readable.
+    match /spots/{spotId} {
+      allow read: if true;
+      allow create: if request.auth != null
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && validBuilding(request.resource.data.area)
+                    && get(/databases/$(database)/documents/users/$(request.auth.uid))
+                         .data.get('resident', false) == true
+                    && get(/databases/$(database)/documents/users/$(request.auth.uid))
+                         .data.get('subscribed', false) == true
+                    // Reject any attempt to publish a raw wallet number.
+                    && !('number' in request.resource.data.get('payout', {}))
+                    && request.resource.data.payout.masked is string;
+      // The owner may always edit or delete. A co-host with the 'listing' or
+      // 'pricing' permission may edit the listing — but may NEVER delete it,
+      // reassign ownership, or touch the payout. Money and control stay with
+      // the owner no matter how much day-to-day work is delegated.
+      allow update: if request.auth != null
+                    && resource.data.ownerUid == request.auth.uid
+                    && !('number' in request.resource.data.get('payout', {}));
+      allow update: if request.auth != null
+                    && request.auth.uid in resource.data.get('cohostUids', [])
+                    && request.resource.data.ownerUid == resource.data.ownerUid
+                    && request.resource.data.payout == resource.data.payout
+                    && request.resource.data.get('cohostUids', [])
+                       == resource.data.get('cohostUids', []);
+      allow delete: if request.auth != null
+                    && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // --- Bookings: bookings/{bookingId} ---
+    // Readable by the booker, the slot owner, and that slot's co-hosts —
+    // nobody else. Overstay handling needs co-hosts to see the booking, but
+    // never the booker's payment instrument.
+    match /bookings/{bookingId} {
+      allow read: if request.auth != null
+                  && (resource.data.bookerUid == request.auth.uid
+                      || resource.data.ownerUid == request.auth.uid
+                      || request.auth.uid in resource.data.get('cohostUids', []));
+      allow create: if request.auth != null
+                    && request.resource.data.bookerUid == request.auth.uid;
+      // Extending an overstay is the booker's own action; owners and co-hosts
+      // with the overstay permission may also amend.
+      allow update: if request.auth != null
+                    && (resource.data.bookerUid == request.auth.uid
+                        || resource.data.ownerUid == request.auth.uid
+                        || request.auth.uid in resource.data.get('cohostUids', []));
       allow delete: if false;
     }
 
     // --- Crowd-sourced vacancy: vacancy/{lotId} ---
-    // Public read (drivers need to see status without an account); writes
+    // Public read (visitors need to see status without an account); writes
     // require sign-in and a valid status; never deletable.
     match /vacancy/{lotId} {
       allow read: if true;
